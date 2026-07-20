@@ -257,28 +257,41 @@ def render_card(item: dict[str, Any], prefix: str) -> None:
 def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     tags = db.list_tags()
     with st.container(border=True):
-        one, two, three, four = st.columns([3, 2, 2, 2])
-        query = one.text_input("Search by title", key=f"{key}_search")
-        wanted_tags = two.multiselect("Tags", [tag["name"] for tag in tags], key=f"{key}_tags")
-        only_ready = three.checkbox("Solo listos para jugar", key=f"{key}_ready", disabled=key != "backlog")
-        include_unknown = four.checkbox("Include without duration", value=True, key=f"{key}_unknown")
-        values = [float(item["hours"]) for item in items if item["hours"] is not None]
-        duration_range: tuple[float, float] | None = None
-        if len(values) >= 2 and min(values) != max(values):
-            duration_range = st.slider("Duration (hours)", min_value=min(values), max_value=max(values), value=(min(values), max(values)), key=f"{key}_duration")
-        sort_col, direction, view_col = st.columns(3)
+        row1_col1, row1_col2, row1_col3 = st.columns([2, 1, 1], vertical_alignment="bottom")
+        query = row1_col1.text_input("Search by title", key=f"{key}_search")
+        wanted_tags = row1_col2.multiselect("Tags (incluir)", [tag["name"] for tag in tags], key=f"{key}_tags")
+        excluded_tags = row1_col3.multiselect("Tags (excluir)", [tag["name"] for tag in tags], key=f"{key}_tags_exc")
+        
+        row2_col1, row2_col2, row2_col3 = st.columns([2, 1, 1], vertical_alignment="bottom")
+        with row2_col1:
+            duration_category = st.radio("Duration", ["Todas", "Cortos (<10h)", "Medios (10-30h)", "Largos (+30h)"], horizontal=True, key=f"{key}_duration")
+        
+        only_ready = row2_col2.checkbox("Solo listos para jugar", key=f"{key}_ready", disabled=key != "backlog")
+        include_unknown = row2_col3.checkbox("Include without duration", value=True, key=f"{key}_unknown")
+
+        sort_col, direction, view_col = st.columns([2, 1, 1], vertical_alignment="bottom")
         sort_label = sort_col.selectbox("Sort by", ["Title", "Hours", "Date added", "Date de lanzamiento"], key=f"{key}_sort")
         descending = direction.toggle("Descendente", key=f"{key}_descending")
         view = view_col.radio("View", ["Cards", "Table"], horizontal=True, key=f"{key}_view")
+
+    def match_duration(hours: float | None) -> bool:
+        if duration_category == "Todas": return True
+        if hours is None: return True
+        h = float(hours)
+        if duration_category == "Cortos (<10h)" and h < 10: return True
+        if duration_category == "Medios (10-30h)" and 10 <= h < 30: return True
+        if duration_category == "Largos (+30h)" and h >= 30: return True
+        return False
 
     text = query.strip().casefold()
     filtered = [
         item for item in items
         if (not text or text in item["title"].casefold())
         and (not wanted_tags or set(wanted_tags).issubset(item["tags"]))
+        and (not excluded_tags or not set(excluded_tags).intersection(item["tags"]))
         and (not only_ready or item["ready_to_play"])
         and (include_unknown or item["hours"] is not None)
-        and (duration_range is None or item["hours"] is None or duration_range[0] <= float(item["hours"]) <= duration_range[1])
+        and match_duration(item["hours"])
     ]
     fields = {"Title": "title", "Hours": "hours", "Date added": "added_at", "Date de lanzamiento": "release_date"}
     field = fields[sort_label]
@@ -346,14 +359,29 @@ def render_table(items: list[dict[str, Any]], key: str) -> None:
 def inventory_page(title: str, statuses: list[str], key: str) -> None:
     st.title(title)
     items = db.list_games(statuses)
-    if key == "backlog":
-        metrics = db.dashboard_metrics()
+    if key in ("backlog", "played"):
+        known = [float(item["hours"]) for item in items if item.get("hours") is not None]
+        missing = len(items) - len(known)
+        known_sum = sum(known)
+        predicted_total: float | None = None
+        margin: float | None = None
+        
+        if missing and len(known) > 1:
+            mean = known_sum / len(known)
+            variance = sum((value - mean) ** 2 for value in known) / (len(known) - 1)
+            std_dev = variance ** 0.5
+            predicted_total = known_sum + missing * mean
+            margin = 1.28 * std_dev * (missing + (missing**2 / len(known))) ** 0.5
+        elif not missing:
+            predicted_total = known_sum
+            margin = 0
+
         a, b, c = st.columns(3)
-        a.metric("Games", metrics["backlog"])
-        b.metric("Known hours", f"{metrics['known_hours']:.1f} h")
-        c.metric("Predicted hours", "—" if metrics["predicted_hours"] is None else f"{metrics['predicted_hours']:.1f} h")
-        if metrics["margin_hours"] is not None:
-            st.caption(f"80% estimate: ± {metrics['margin_hours']:.1f} h · {metrics['unknown_hours']} without duration.")
+        a.metric("Games", len(items))
+        b.metric("Known hours", f"{known_sum:.1f} h")
+        c.metric("Predicted hours", "—" if predicted_total is None else f"{predicted_total:.1f} h")
+        if margin is not None:
+            st.caption(f"80% estimate: ± {margin:.1f} h · {missing} without duration.")
     if not items:
         st.info("Todavía no hay games aquí. Añade títulos desde «Add Games».")
         return
