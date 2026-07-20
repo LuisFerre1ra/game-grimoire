@@ -27,13 +27,47 @@ def inject_styles() -> None:
           .game-placeholder {height:168px; display:flex; flex-direction:column; align-items:center;
             justify-content:center; border-radius:.55rem; color:#d7e3f5; background:linear-gradient(145deg,#24334d,#121b2b); font-size:.9rem;}
           .game-placeholder small {font-size:.78rem; margin-top:.55rem; color:#aebed2;}
-          .tag-chip {display:inline-block; margin:.14rem .16rem .1rem 0; padding:.1rem .45rem; border-radius:999px;
+          .tag-chip {display:inline-block; margin:.2rem .4rem .2rem 0; padding:.1rem .45rem; border-radius:999px;
             background:#27374d; color:#e6eefb; font-size:.78rem;}
           .muted {color:#9aa8ba; font-size:.86rem;}
           div[data-testid="stImage"] img {height:168px !important; width:100% !important; object-fit:cover; border-radius:.55rem;}
-          div[data-testid="stFullScreenFrame"] {position:relative !important;}
-          div[data-testid="stFullScreenFrame"] > div:first-child {top:.45rem !important;
-            right:.45rem !important; z-index:10 !important;}
+          div[data-testid="stFullScreenFrame"] > div > div:first-child {padding: 0.5rem; top: 0 !important;}
+          div[data-testid="stPopover"] button div[data-testid="stMarkdownContainer"] {display: none;}
+          button[data-testid="stPopoverButton"] > div {margin-right:0;}
+          button[data-testid="stPopoverButton"] > div > div:first-child {display: none;}
+          div[data-testid="stPopoverBody"] { padding: 0.25rem 0 !important; }
+          div[data-testid="stPopoverBody"] .stVerticalBlock { gap: 0 !important; }
+          div[data-testid="stPopoverBody"] .element-container { margin-bottom: 0 !important; }
+          div[data-testid="stPopoverBody"] button { margin: 0 !important; padding: 0.35rem 1rem !important; min-height: 2.2rem !important; text-align: left !important; }
+          div[data-testid="stPopoverBody"] button > div { justify-content: flex-start !important; }
+          /* Custom Sidebar Navigation */
+          [data-testid="stSidebar"] {
+            background-color: #0b1423;
+            border-right: 1px solid #1a2536;
+          }
+          [data-testid="stSidebar"] [data-testid="stButton"] button {
+            border: none;
+            background-color: transparent;
+            color: #8b9bb4;
+            display: flex;
+            justify-content: flex-start;
+            padding: 0.6rem 1rem;
+            border-radius: 0.4rem;
+            transition: all 0.2s ease;
+            box-shadow: none;
+          }
+          [data-testid="stSidebar"] [data-testid="stButton"] button:hover {
+            background-color: #172439;
+            color: #ffffff;
+            transform: translateX(4px);
+          }
+          [data-testid="stSidebar"] [data-testid="stButton"] button[kind="primary"] {
+            background-color: #1e3152;
+            color: #60a5fa;
+            border-left: 4px solid #3b82f6;
+            border-radius: 0 0.4rem 0.4rem 0;
+            font-weight: bold;
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -64,7 +98,16 @@ def cover_reference(item: dict[str, Any]) -> str | None:
 def tag_html(tags: Iterable[str], limit: int = 4) -> str:
     names = list(tags)
     shown = names[:limit] + ([f"+{len(names) - limit}"] if len(names) > limit else [])
-    return "".join(f'<span class="tag-chip">{name}</span>' for name in shown) or '<span class="muted">No tags</span>'
+    
+    all_tags = db.list_tags()
+    name_to_color = {t["name"]: t["color"] for t in all_tags}
+    
+    chips = []
+    for name in shown:
+        color = name_to_color.get(name, "#27374d")
+        chips.append(f'<span class="tag-chip" style="background-color: {color};">{name}</span>')
+        
+    return "".join(chips) or '<span class="muted">No tags</span>'
 
 
 def queue_dialog(kind: str, game_id: int) -> None:
@@ -179,24 +222,29 @@ def show_pending_dialog() -> None:
 
 
 def game_actions(item: dict[str, Any], prefix: str) -> None:
-    with st.popover("⋯", help="Actions", use_container_width=True):
-        st.caption(item["title"])
+    if st.session_state.get("dialog"):
+        st.button("", help="Actions", disabled=True, use_container_width=True, key=f"{prefix}_disabled")
+        return
+        
+    with st.popover("", help="Actions", use_container_width=True):
         for kind, label in [("edit", "Edit"), ("status", "Change status"), ("metadata", "Ver metadatos"), ("delete", "Delete")]:
-            if st.button(label, key=f"{prefix}_{kind}"):
+            if st.button(label, key=f"{prefix}_{kind}", type="tertiary", use_container_width=True):
                 queue_dialog(kind, item["id"])
                 st.rerun()
 
 
 def render_card(item: dict[str, Any], prefix: str) -> None:
-    with st.container(height=390, border=True):
+    with st.container(height=355, border=True):
         cover = cover_reference(item)
         if cover:
             st.image(cover, width="stretch")
         else:
             st.markdown('<div class="game-placeholder">Sin cover</div>', unsafe_allow_html=True)
-        title = item["title"] if len(item["title"]) <= 56 else f"{item['title'][:53]}…"
+            st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
         left, right = st.columns([5, 2])
-        left.markdown(f"**{title}**")
+        safe_title = item["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        title_html = f'<div title="{safe_title}" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: bold; line-height: 1.4; max-height: 2.8em; margin-bottom: 0.5rem;">{safe_title}</div>'
+        left.markdown(title_html, unsafe_allow_html=True)
         with right:
             game_actions(item, prefix)
         detail = format_hours(item.get("hours"))
@@ -244,14 +292,37 @@ def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any
 def render_cards(items: list[dict[str, Any]], key: str) -> None:
     page_size = st.select_slider("Games por página", options=[12, 24, 36, 48], value=24, key=f"{key}_page_size")
     pages = max(1, (len(items) + page_size - 1) // page_size)
-    page = int(st.number_input("Página", min_value=1, max_value=pages, value=1, step=1, key=f"{key}_page"))
+    
+    page_state_key = f"{key}_page_state"
+    if page_state_key not in st.session_state:
+        st.session_state[page_state_key] = 1
+        
+    if st.session_state[page_state_key] > pages:
+        st.session_state[page_state_key] = max(1, pages)
+        
+    page = st.session_state[page_state_key]
+    
+    def render_pagination(suffix: str) -> None:
+        col1, col2, col3 = st.columns([1, 8, 1])
+        if col1.button("<", key=f"{key}_prev_{suffix}", disabled=page <= 1, use_container_width=True):
+            st.session_state[page_state_key] -= 1
+            st.rerun()
+        col2.markdown(f"<div style='text-align: center; padding-top: 0.5rem;'><b>Página {page} de {pages}</b></div>", unsafe_allow_html=True)
+        if col3.button(">", key=f"{key}_next_{suffix}", disabled=page >= pages, use_container_width=True):
+            st.session_state[page_state_key] += 1
+            st.rerun()
+
+    render_pagination("top")
+        
     current = items[(page - 1) * page_size : page * page_size]
-    st.caption(f"Mostrando {len(current)} de {len(items)} games · página {page} de {pages}")
+    st.caption(f"Mostrando {len(current)} de {len(items)} games")
     for start in range(0, len(current), 4):
         columns = st.columns(4)
         for column, item in zip(columns, current[start : start + 4]):
             with column:
                 render_card(item, f"{key}_{item['id']}")
+                
+    render_pagination("bottom")
 
 
 def render_table(items: list[dict[str, Any]], key: str) -> None:
@@ -453,13 +524,14 @@ def main() -> None:
     pages = [, "Backlog", "Played", "Add Games", "Settings"]
     if "page" not in st.session_state:
         st.session_state["page"] =
-    if "sidebar_navigation" not in st.session_state:
-        st.session_state["sidebar_navigation"] = st.session_state["page"]
-    with st.sidebar:
-        st.header("Library")
-        chosen = st.radio("Navegación", pages, key="sidebar_navigation")
-        st.session_state["page"] = chosen
+        
     page = st.session_state["page"]
+    with st.sidebar:
+        st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Library</h2>", unsafe_allow_html=True)
+        for p in pages:
+            if st.button(p, key=f"nav_{p}", use_container_width=True, type="primary" if page == p else "secondary"):
+                st.session_state["page"] = p
+                st.rerun()
     if page ==: home_page()
     elif page == "Backlog": inventory_page("Backlog", ["backlog"], "backlog")
     elif page == "Played": inventory_page("Played & Abandoned", ["played", "abandoned"], "played")
