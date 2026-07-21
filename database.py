@@ -431,6 +431,22 @@ def update_game_metadata(game_id: int, metadata: dict[str, Any], local_cover_pat
         )
         _history(conn, game_id, "metadata_updated", {"source": "RAWG"})
 
+def clear_game_metadata(game_id: int) -> None:
+    with connection() as conn:
+        conn.execute(
+            """
+            UPDATE games SET
+                rawg_id = NULL, rawg_slug = NULL, release_date = NULL,
+                cover_local_path = NULL, cover_source_url = NULL,
+                developers_json = NULL, genres_json = NULL, rawg_tags_json = NULL,
+                metadata_source = NULL, metadata_updated_at = NULL, external_metadata_json = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (now_iso(), game_id),
+        )
+        _history(conn, game_id, "metadata_cleared", {})
+
 
 def _history(conn: sqlite3.Connection, game_id: int, event_type: str, details: dict[str, Any]) -> None:
     conn.execute(
