@@ -185,19 +185,73 @@ def delete_game_dialog(game_id: int) -> None:
         st.session_state.pop("dialog", None)
         st.rerun()
 
+@st.dialog("Limpiar details", on_dismiss=dismiss_dialog)
+def clear_metadata_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    st.warning(f"All downloaded details (cover, genres, etc.) will be deleted for **{item['title']}**. Are you sure?")
+    left, right = st.columns(2)
+    if left.button("Limpiar details", type="primary"):
+        db.clear_game_metadata(game_id)
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    if right.button("Cancel"):
+        st.session_state.pop("dialog", None)
+        st.rerun()
 
-@st.dialog("Metadatos", on_dismiss=dismiss_dialog)
+
+@st.dialog("Game details", on_dismiss=dismiss_dialog, width="large")
 def metadata_dialog(game_id: int) -> None:
     item = db.get_game(game_id)
     if not item:
         st.error("Game no longer exists.")
         return
     st.subheader(item["title"])
-    st.caption(f"Source: {item.get('metadata_source') or 'sin metadatos'}")
+    st.caption(f"Source: {item.get('metadata_source') or 'no info'}")
+    
+    meta = {}
+    rating_str = "—"
+    metacritic = "—"
+    playtime = "—"
+    age_rating = "—"
+    publishers_str = "—"
+    description = "—"
+
+    if item.get("external_metadata_json"):
+        try:
+            meta = json.loads(item["external_metadata_json"])
+            if "rating" in meta and "rating_top" in meta and meta["rating"] > 0:
+                rating_str = f"{meta['rating']}/{meta['rating_top']}"
+            
+            if meta.get("metacritic"):
+                metacritic = str(meta["metacritic"])
+            
+            if meta.get("playtime"):
+                playtime = f"{meta['playtime']} h"
+                
+            esrb = meta.get("esrb_rating")
+            if esrb and "name" in esrb:
+                age_rating = esrb["name"]
+                
+            pubs = meta.get("publishers", [])
+            if pubs:
+                publishers_str = ", ".join(p["name"] for p in pubs)
+                
+            description = meta.get("description_raw") or meta.get("description") or "—"
+        except json.JSONDecodeError:
+            pass
+
     a, b, c = st.columns(3)
     a.metric("Lanzamiento", readable_date(item.get("release_date")))
     b.metric("Duration", format_hours(item.get("hours")))
-    c.metric("RAWG ID", item.get("rawg_id") or "—")
+    c.metric("Valoración", rating_str)
+    
+    d, e, f = st.columns(3)
+    d.metric("Metacritic", metacritic)
+    e.metric("Tiempo RAWG", playtime)
+    f.metric("Clasificación", age_rating)
 
     def field_list(name: str) -> str:
         try:
@@ -206,19 +260,55 @@ def metadata_dialog(game_id: int) -> None:
             return "—"
 
     st.write(f"**Developers:** {field_list('developers_json')}")
-    st.write(f"**Géneros RAWG:** {field_list('genres_json')}")
-    st.write(f"**Tags RAWG:** {field_list('rawg_tags_json')}")
+    st.write(f"**Publishers:** {publishers_str}")
+    st.write(f"**Géneros:** {field_list('genres_json')}")
+    st.write(f"**Tags:** {field_list('rawg_tags_json')}")
+    st.write(f"**Description:** {description}")
     if item.get("cover_source_url"):
         st.link_button("Abrir imagen de origen", item["cover_source_url"])
     if item.get("external_metadata_json"):
-        with st.expander("Saved RAWG data"):
+        with st.expander("Internal Archive"):
             st.json(json.loads(item["external_metadata_json"]))
+
+
+@st.dialog("Completar información", on_dismiss=dismiss_dialog)
+def enrich_game_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.error("Game no longer exists.")
+        return
+    
+    if not db.get_setting("rawg_api_key"):
+        st.warning("Configura primero la key de RAWG en Settings.")
+        if st.button("Close"):
+            st.session_state.pop("dialog", None)
+            st.rerun()
+        return
+
+    st.write(f"Search and update details for **{item['title']}** online?")
+    
+    left, right = st.columns(2)
+    if left.button("Update data", type="primary"):
+        with st.spinner("Buscando en RAWG..."):
+            try:
+                result = enrich_one(game_id, item['title'])
+                st.toast(result)
+            except ProviderError as exc:
+                st.toast(f"Error: {exc}")
+            except Exception as exc:
+                st.toast(f"Error inesperado: {exc}")
+        st.session_state.pop("dialog", None)
+        st.rerun()
+        
+    if right.button("Cancel"):
+        st.session_state.pop("dialog", None)
+        st.rerun()
 
 
 def show_pending_dialog() -> None:
     active = st.session_state.get("dialog")
     if active:
-        {"edit": edit_game_dialog, "status": status_dialog, "delete": delete_game_dialog, "metadata": metadata_dialog}[active["kind"]](active["game_id"])
+        {"edit": edit_game_dialog, "status": status_dialog, "delete": delete_game_dialog, "metadata": metadata_dialog, "enrich": enrich_game_dialog, "clear_metadata": clear_metadata_dialog}[active["kind"]](active["game_id"])
 
 
 def game_actions(item: dict[str, Any], prefix: str) -> None:
@@ -227,7 +317,7 @@ def game_actions(item: dict[str, Any], prefix: str) -> None:
         return
         
     with st.popover("", help="Actions", use_container_width=True):
-        for kind, label in [("edit", "Edit"), ("status", "Change status"), ("metadata", "Ver metadatos"), ("delete", "Delete")]:
+        for kind, label in [("edit", "Edit"), ("status", "Change status"), ("metadata", "Ver details"), ("enrich", "Completar información"), ("clear_metadata", "Limpiar details"), ("delete", "Delete")]:
             if st.button(label, key=f"{prefix}_{kind}", type="tertiary", use_container_width=True):
                 queue_dialog(kind, item["id"])
                 st.rerun()
@@ -393,23 +483,6 @@ def inventory_page(title: str, statuses: list[str], key: str) -> None:
         render_table(shown, key)
 
 
-def home_page() -> None:
-    st.title("My Game Library")
-    st.write("Una library local: primero tus datos; las APIs sólo enriquecen lo que elijas.")
-    metrics = db.dashboard_metrics()
-    a, b, c, d = st.columns(4)
-    a.metric("Backlog", metrics["backlog"])
-    b.metric("Readys para jugar", metrics["ready"])
-    c.metric("Played", metrics["played"])
-    d.metric("Abandoned", metrics["abandoned"])
-    known, prediction = st.columns(2)
-    known.metric("Known backlog hours", f"{metrics['known_hours']:.1f} h")
-    estimate = "Aún no hay suficientes datos"
-    if metrics["predicted_hours"] is not None:
-        estimate = f"{metrics['predicted_hours']:.1f} h"
-        if metrics["margin_hours"]:
-            estimate += f" ± {metrics['margin_hours']:.1f} h"
-    prediction.metric("Total previsto (80%)", estimate)
 def enrich_one(game_id: int, title: str) -> str:
     metadata, message = fetch_rawg_metadata(title, db.get_setting("rawg_api_key"))
     if not metadata:
@@ -433,7 +506,7 @@ def add_games_page() -> None:
         destination = st.radio("Add to", ["Backlog", "Played", "Abandoned"], horizontal=True)
         selected_tags = st.multiselect("Initial Tags", list(label_to_id))
         ready = st.checkbox("Mark as ready to play", disabled=destination != "Backlog")
-        enrich = st.checkbox("Fetch RAWG metadata and cover now", value=has_rawg, disabled=not has_rawg)
+        enrich = st.checkbox("Fetch details and cover automatically", value=has_rawg, disabled=not has_rawg)
         submitted = st.form_submit_button("Add Games", type="primary")
     if not submitted:
         return
@@ -475,7 +548,7 @@ def add_games_page() -> None:
 
 def configuration_page() -> None:
     st.title("Settings")
-    connection_tab, tags_tab, enrichment_tab, export_tab = st.tabs(["Conexiones", "Tags", "Re-enriquecer", "Exportar"])
+    connection_tab, tags_tab, enrichment_tab, export_tab = st.tabs(["Connections", "Tags", "Enrichment"ualizar catálogo", "Exportar"])
     with connection_tab:
         st.subheader("Servicios optionales")
         st.caption("The application works without external services; RAWG se consulta sólo al pedirlo.")
@@ -517,26 +590,45 @@ def configuration_page() -> None:
             except Exception as exc:
                 st.error(f"Could not modify tag: {exc}")
     with enrichment_tab:
-        st.subheader("Update RAWG metadata")
+        st.subheader("Update missing data")
         games = db.list_games()
         if not db.get_setting("rawg_api_key"):
             st.info("Configure a RAWG API key first in Connections.")
         elif not games:
             st.info("No games to update.")
         else:
-            labels = {f"{item['title']} · {STATUS_LABELS[item['status']]}": item for item in games}
-            chosen = st.multiselect("Games a re-enriquecer", list(labels))
-            if st.button("Update selection", disabled=not chosen, type="primary"):
+            missing_info = [g for g in games if not g.get("external_metadata_json")]
+            
+            c1, c2 = st.columns(2)
+            c1.metric("Games in library", len(games))
+            c2.metric("Games no info", len(missing_info))
+            
+            st.write("### Opciones de actualización")
+            st.write("**Option A: Search missing data**\nBusca details y covers únicamente para los games que aún no tienen información.")
+            btn_missing = st.button("Search missing data", disabled=len(missing_info) == 0, type="primary")
+            
+            st.write("**Opción B: Actualización completa**\nVuelve a descargar la información de todos tus games. Útil si quieres refrescar las valoraciones o covers.")
+            btn_all = st.button("Update whole collection")
+            
+            to_update = []
+            if btn_missing:
+                to_update = missing_info
+            elif btn_all:
+                to_update = games
+                
+            if to_update:
                 progress = st.progress(0, text="Actualizando datos…")
                 results: list[str] = []
-                for number, label in enumerate(chosen, start=1):
-                    item = labels[label]
+                for number, item in enumerate(to_update, start=1):
                     try:
                         results.append(f"{item['title']}: {enrich_one(item['id'], item['title'])}")
                     except ProviderError as exc:
                         results.append(f"{item['title']}: {exc}")
-                    progress.progress(number / len(chosen), text=f"Actualizando {number} de {len(chosen)}…")
-                progress.empty(); st.success("Proceso terminado."); st.write("\n\n".join(results))
+                    progress.progress(number / len(to_update), text=f"Actualizando {number} de {len(to_update)}…")
+                progress.empty()
+                st.success("Proceso terminado.")
+                with st.expander("Ver resultados detallados"):
+                    st.write("\n\n".join(results))
     with export_tab:
         st.subheader("Exportaciones locales")
         rows = db.export_rows()
@@ -549,9 +641,9 @@ def configuration_page() -> None:
 
 def main() -> None:
     inject_styles()
-    pages = [, "Backlog", "Played", "Add Games", "Settings"]
+    pages = ["Backlog", "Played", "Add Games", "Settings"]
     if "page" not in st.session_state:
-        st.session_state["page"] =
+        st.session_state["page"] = "Backlog"
         
     page = st.session_state["page"]
     with st.sidebar:
@@ -560,8 +652,7 @@ def main() -> None:
             if st.button(p, key=f"nav_{p}", use_container_width=True, type="primary" if page == p else "secondary"):
                 st.session_state["page"] = p
                 st.rerun()
-    if page ==: home_page()
-    elif page == "Backlog": inventory_page("Backlog", ["backlog"], "backlog")
+    if page == "Backlog": inventory_page("Backlog", ["backlog"], "backlog")
     elif page == "Played": inventory_page("Played & Abandoned", ["played", "abandoned"], "played")
     elif page ==: statistics_page()
     elif page == "Add Games": add_games_page()
