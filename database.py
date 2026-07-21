@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from interfaces import UnifiedGameData
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "game_library.db"
@@ -76,6 +78,8 @@ def init_database() -> None:
                 name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 category TEXT NOT NULL DEFAULT 'Other',
                 color TEXT NOT NULL DEFAULT '#7E8996',
+                parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
+                is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0, 1)),
                 created_at TEXT NOT NULL
             );
 
@@ -99,7 +103,8 @@ def init_database() -> None:
                 rawg_tags_json TEXT,
                 metadata_source TEXT,
                 metadata_updated_at TEXT,
-                external_metadata_json TEXT
+                external_metadata_json TEXT,
+                developer_info_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS game_tags (
@@ -149,8 +154,31 @@ def init_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
             CREATE INDEX IF NOT EXISTS idx_games_added_at ON games(added_at);
             CREATE INDEX IF NOT EXISTS idx_play_events_game ON play_events(game_id);
+
+            CREATE TABLE IF NOT EXISTS game_provider_data (
+                id INTEGER PRIMARY KEY,
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                provider_name TEXT NOT NULL,
+                provider_game_id TEXT NOT NULL,
+                raw_payload_json TEXT,
+                fetched_at TEXT NOT NULL,
+                UNIQUE(game_id, provider_name)
+            );
             """
         )
+        try:
+            conn.execute("ALTER TABLE tags ADD COLUMN parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE tags ADD COLUMN is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0, 1))")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE games ADD COLUMN developer_info_json TEXT")
+        except sqlite3.OperationalError:
+            pass
+
         conn.execute(
             "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1')"
         )
@@ -162,6 +190,39 @@ def init_database() -> None:
             """,
             [(name, category, color, stamp) for name, category, color in DEFAULT_TAGS],
         )
+
+def migrate_phase1() -> None:
+    """Migrate existing RAWG data from games table to game_provider_data."""
+    init_database()
+    with connection() as conn:
+        games = conn.execute(
+            "SELECT id, metadata_source, rawg_id, external_metadata_json, metadata_updated_at "
+            "FROM games WHERE (rawg_id IS NOT NULL OR external_metadata_json IS NOT NULL) AND metadata_source IS NOT NULL"
+        ).fetchall()
+        for g in games:
+            provider = g["metadata_source"]
+            # Some old rows might have RAWG implicitly.
+            if not provider:
+                provider = "RAWG"
+            game_id = g["id"]
+            # For RAWG it was rawg_id, if it's IGDB it might be in the metadata if rawg_id is null
+            prov_id = str(g["rawg_id"]) if g["rawg_id"] else ""
+            if not prov_id and g["external_metadata_json"]:
+                try:
+                    prov_id = str(json.loads(g["external_metadata_json"]).get("id", ""))
+                except Exception:
+                    pass
+            
+            raw = g["external_metadata_json"]
+            fetched = g["metadata_updated_at"] or now_iso()
+            
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO game_provider_data(game_id, provider_name, provider_game_id, raw_payload_json, fetched_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (game_id, provider, prov_id, raw, fetched)
+            )
 
 
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
@@ -223,13 +284,26 @@ def list_tags() -> list[dict[str, Any]]:
         ]
 
 
+def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996", parent_id: int | None = None, is_custom: bool = False) -> int:
+    clean_name = name.strip()
+    with connection() as conn:
+        row = conn.execute("SELECT id FROM tags WHERE name = ?", (clean_name,)).fetchone()
+        if row:
+            return row["id"]
+        cursor = conn.execute(
+            "INSERT INTO tags(name, category, color, parent_id, is_custom, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (clean_name, category, color, parent_id, int(is_custom), now_iso())
+        )
+        return cursor.lastrowid
+
+
 def add_tag(name: str, category: str = "Other", color: str = "#7E8996") -> None:
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Tag requires a name.")
     with connection() as conn:
         conn.execute(
-            "INSERT INTO tags(name, category, color, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO tags(name, category, color, is_custom, created_at) VALUES (?, ?, ?, 1, ?)",
             (clean_name, category.strip() or "Other", color, now_iso()),
         )
 
@@ -399,37 +473,67 @@ def delete_game(game_id: int) -> None:
         conn.execute("DELETE FROM games WHERE id = ?", (game_id,))
 
 
-def update_game_metadata(game_id: int, metadata: dict[str, Any], local_cover_path: str | None) -> None:
-    developers = [item.get("name") for item in metadata.get("developers", []) if item.get("name")]
-    genres = [item.get("name") for item in metadata.get("genres", []) if item.get("name")]
-    rawg_tags = [item.get("name") for item in metadata.get("tags", []) if item.get("name")]
+def update_game_metadata(
+    game_id: int, 
+    unified: UnifiedGameData, 
+    raw_payload: str, 
+    provider_name: str, 
+    local_cover_path: str | None
+) -> None:
+    multiplayer_parent_id = None
+    if unified.multiplayer_modes:
+        multiplayer_parent_id = get_or_create_tag("Multiplayer", category="Mode", color="#4389D7")
+        
+    tag_ids = set()
+    for g in unified.genres:
+        tag_ids.add(get_or_create_tag(g, category="Género", color="#5C85A6"))
+    for t in unified.themes:
+        tag_ids.add(get_or_create_tag(t, category="Tema", color="#7A68A6"))
+    for gm in unified.game_modes:
+        if gm.lower() not in {"multiplayer", "multiplayedr"}:
+            tag_ids.add(get_or_create_tag(gm, category="Mode", color="#4389D7"))
+    for mm in unified.multiplayer_modes:
+        tag_ids.add(get_or_create_tag(mm, category="Mode", color="#4389D7", parent_id=multiplayer_parent_id))
+    if unified.game_status:
+        tag_ids.add(get_or_create_tag(unified.game_status, category="Status de Lanzamiento", color="#A8745A"))
+
     with connection() as conn:
         conn.execute(
             """
             UPDATE games SET
-                rawg_id = ?, rawg_slug = ?, release_date = ?,
+                release_date = COALESCE(?, release_date),
                 cover_local_path = COALESCE(?, cover_local_path),
-                cover_source_url = ?, developers_json = ?, genres_json = ?, rawg_tags_json = ?,
-                metadata_source = 'RAWG', metadata_updated_at = ?, external_metadata_json = ?,
+                cover_source_url = COALESCE(?, cover_source_url),
+                developer_info_json = ?,
                 updated_at = ?
             WHERE id = ?
             """,
             (
-                metadata.get("id"),
-                metadata.get("slug"),
-                metadata.get("released"),
+                unified.first_release_date,
                 local_cover_path,
-                metadata.get("background_image"),
-                json.dumps(developers, ensure_ascii=False),
-                json.dumps(genres, ensure_ascii=False),
-                json.dumps(rawg_tags, ensure_ascii=False),
-                now_iso(),
-                json.dumps(metadata, ensure_ascii=False),
+                unified.cover_url,
+                json.dumps({"developers": unified.developers, "publishers": unified.publishers}, ensure_ascii=False),
                 now_iso(),
                 game_id,
             ),
         )
-        _history(conn, game_id, "metadata_updated", {"source": "RAWG"})
+        
+        conn.execute(
+            """
+            INSERT INTO game_provider_data(game_id, provider_name, provider_game_id, raw_payload_json, fetched_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(game_id, provider_name) DO UPDATE SET
+                provider_game_id = excluded.provider_game_id,
+                raw_payload_json = excluded.raw_payload_json,
+                fetched_at = excluded.fetched_at
+            """,
+            (game_id, provider_name, unified.provider_id, raw_payload, now_iso())
+        )
+        
+        for tid in tag_ids:
+            conn.execute("INSERT OR IGNORE INTO game_tags(game_id, tag_id) VALUES (?, ?)", (game_id, tid))
+        
+        _history(conn, game_id, "metadata_updated", {"source": provider_name})
 
 def clear_game_metadata(game_id: int) -> None:
     with connection() as conn:
