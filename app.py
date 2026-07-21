@@ -10,7 +10,8 @@ import pandas as pd
 import streamlit as st
 
 import database as db
-from providers import ProviderError, cache_cover, fetch_rawg_metadata
+from providers import ProviderError, cache_cover, RAWGProvider, IGDBProvider
+from interfaces import MetadataProvider
 
 
 st.set_page_config(page_title="My Game Library", layout="wide")
@@ -126,9 +127,10 @@ def edit_game_dialog(game_id: int) -> None:
         st.error("Game no longer exists.")
         return
     tags = db.list_tags()
-    label_to_id = {tag["name"]: tag["id"] for tag in tags}
+    custom_tags = [t for t in tags if t["is_custom"]]
+    label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
     selected_ids = set(db.get_game_tags(game_id))
-    selected = [tag["name"] for tag in tags if tag["id"] in selected_ids]
+    selected = [tag["name"] for tag in custom_tags if tag["id"] in selected_ids]
     with st.form(f"edit_game_{game_id}"):
         title = st.text_input("Title", value=item["title"])
         ready = st.checkbox("Ready to play", value=item["ready_to_play"])
@@ -209,66 +211,66 @@ def metadata_dialog(game_id: int) -> None:
         st.error("Game no longer exists.")
         return
     st.subheader(item["title"])
-    st.caption(f"Source: {item.get('metadata_source') or 'no info'}")
     
-    meta = {}
+    provider_data = None
+    with db.connection() as conn:
+        provider_data = conn.execute("SELECT provider_name, raw_payload_json FROM game_provider_data WHERE game_id = ? ORDER BY fetched_at DESC LIMIT 1", (game_id,)).fetchone()
+    
+    st.caption(f"Source: {provider_data['provider_name'] if provider_data else 'no info'}")
+    
     rating_str = "—"
-    metacritic = "—"
-    playtime = "—"
+    playtime = format_hours(item.get("hours"))
     age_rating = "—"
-    publishers_str = "—"
     description = "—"
 
-    if item.get("external_metadata_json"):
+    if provider_data:
         try:
-            meta = json.loads(item["external_metadata_json"])
-            if "rating" in meta and "rating_top" in meta and meta["rating"] > 0:
-                rating_str = f"{meta['rating']}/{meta['rating_top']}"
-            
-            if meta.get("metacritic"):
-                metacritic = str(meta["metacritic"])
-            
-            if meta.get("playtime"):
-                playtime = f"{meta['playtime']} h"
-                
-            esrb = meta.get("esrb_rating")
-            if esrb and "name" in esrb:
-                age_rating = esrb["name"]
-                
-            pubs = meta.get("publishers", [])
-            if pubs:
-                publishers_str = ", ".join(p["name"] for p in pubs)
-                
-            description = meta.get("description_raw") or meta.get("description") or "—"
+            meta = json.loads(provider_data["raw_payload_json"])
+            if provider_data["provider_name"] == "RAWG":
+                description = meta.get("description_raw") or meta.get("description") or "—"
+                esrb = meta.get("esrb_rating")
+                if esrb and "name" in esrb:
+                    age_rating = esrb["name"]
+                if meta.get("rating"):
+                    rating_str = f"{meta['rating']}/{meta.get('rating_top', 5)}"
+            elif provider_data["provider_name"] == "IGDB":
+                description = meta.get("summary") or "—"
+                if meta.get("rating"):
+                    rating_str = f"{meta['rating']:.1f}/100"
         except json.JSONDecodeError:
             pass
 
     a, b, c = st.columns(3)
     a.metric("Lanzamiento", readable_date(item.get("release_date")))
-    b.metric("Duration", format_hours(item.get("hours")))
+    b.metric("Duration", playtime)
     c.metric("Valoración", rating_str)
+
+    try:
+        dev_info = json.loads(item.get("developer_info_json") or "{}")
+        devs = ", ".join(dev_info.get("developers", [])) or "—"
+        pubs = ", ".join(dev_info.get("publishers", [])) or "—"
+    except json.JSONDecodeError:
+        devs = pubs = "—"
+
+    st.write(f"**Developers:** {devs}")
+    st.write(f"**Publishers:** {pubs}")
     
-    d, e, f = st.columns(3)
-    d.metric("Metacritic", metacritic)
-    e.metric("Tiempo RAWG", playtime)
-    f.metric("Clasificación", age_rating)
-
-    def field_list(name: str) -> str:
-        try:
-            return ", ".join(json.loads(item.get(name) or "[]")) or "—"
-        except json.JSONDecodeError:
-            return "—"
-
-    st.write(f"**Developers:** {field_list('developers_json')}")
-    st.write(f"**Publishers:** {publishers_str}")
-    st.write(f"**Géneros:** {field_list('genres_json')}")
-    st.write(f"**Tags:** {field_list('rawg_tags_json')}")
+    with db.connection() as conn:
+        tags = conn.execute("SELECT t.name, t.category FROM tags t JOIN game_tags gt ON t.id = gt.tag_id WHERE gt.game_id = ? ORDER BY t.category, t.name", (game_id,)).fetchall()
+    
+    if tags:
+        for cat in set(t["category"] for t in tags):
+            cat_tags = [t["name"] for t in tags if t["category"] == cat]
+            st.write(f"**{cat}:** {', '.join(cat_tags)}")
+    else:
+        st.write("No associated tags.")
+        
     st.write(f"**Description:** {description}")
     if item.get("cover_source_url"):
         st.link_button("Abrir imagen de origen", item["cover_source_url"])
-    if item.get("external_metadata_json"):
+    if provider_data:
         with st.expander("Internal Archive"):
-            st.json(json.loads(item["external_metadata_json"]))
+            st.json(json.loads(provider_data["raw_payload_json"]))
 
 
 @st.dialog("Completar información", on_dismiss=dismiss_dialog)
@@ -278,23 +280,23 @@ def enrich_game_dialog(game_id: int) -> None:
         st.error("Game no longer exists.")
         return
     
-    if not db.get_setting("rawg_api_key"):
-        st.warning("Configura primero la key de RAWG en Settings.")
+    providers = get_ordered_providers()
+    if not providers:
+        st.warning("Configure credentials for a provider in Settings.")
         if st.button("Close"):
             st.session_state.pop("dialog", None)
             st.rerun()
         return
 
     st.write(f"Search and update details for **{item['title']}** online?")
+    st.caption("Configured providers will be used in order.")
     
     left, right = st.columns(2)
     if left.button("Update data", type="primary"):
-        with st.spinner("Buscando en RAWG..."):
+        with st.spinner("Buscando metadatos..."):
             try:
                 result = enrich_one(game_id, item['title'])
                 st.toast(result)
-            except ProviderError as exc:
-                st.toast(f"Error: {exc}")
             except Exception as exc:
                 st.toast(f"Error inesperado: {exc}")
         st.session_state.pop("dialog", None)
@@ -483,30 +485,59 @@ def inventory_page(title: str, statuses: list[str], key: str) -> None:
         render_table(shown, key)
 
 
+def get_ordered_providers() -> list[MetadataProvider]:
+    rawg_key = db.get_setting("rawg_api_key")
+    igdb_id = db.get_setting("igdb_client_id")
+    igdb_secret = db.get_setting("igdb_client_secret")
+    
+    priority = db.get_setting("provider_priority", "IGDB,RAWG").split(",")
+    
+    providers: list[MetadataProvider] = []
+    for p in priority:
+        if p.strip() == "RAWG" and rawg_key:
+            providers.append(RAWGProvider(rawg_key))
+        elif p.strip() == "IGDB" and igdb_id and igdb_secret:
+            providers.append(IGDBProvider(igdb_id, igdb_secret))
+    return providers
+
 def enrich_one(game_id: int, title: str) -> str:
-    metadata, message = fetch_rawg_metadata(title, db.get_setting("rawg_api_key"))
-    if not metadata:
-        return message or "No se encontraron metadatos."
-    try:
-        local_cover = cache_cover(metadata.get("background_image"), game_id)
-    except Exception:
-        local_cover = None
-    db.update_game_metadata(game_id, metadata, local_cover)
-    return message or "Metadatos actualizados."
+    providers = get_ordered_providers()
+    if not providers:
+        return "No providers configured."
+        
+    last_error = ""
+    for provider in providers:
+        try:
+            results = provider.search(title)
+            if results:
+                best = results[0]
+                unified, raw = provider.fetch_details(best.provider_id)
+                local_cover = None
+                try:
+                    local_cover = cache_cover(unified.cover_url, game_id)
+                except Exception:
+                    pass
+                db.update_game_metadata(game_id, unified, json.dumps(raw, ensure_ascii=False), provider.get_name(), local_cover)
+                return f"Updated from {provider.get_name()}."
+        except ProviderError as exc:
+            last_error = f"{provider.get_name()} error: {exc}"
+            continue
+    return last_error or "No se encontraron coincidencias en ningún proveedor."
 
 
 def add_games_page() -> None:
     st.title("Add Games")
     st.write("Paste one title per line. Duplicates are detected by normalized title.")
     tags = db.list_tags()
-    label_to_id = {tag["name"]: tag["id"] for tag in tags}
-    has_rawg = bool(db.get_setting("rawg_api_key"))
+    custom_tags = [t for t in tags if t["is_custom"]]
+    label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
+    has_providers = bool(get_ordered_providers())
     with st.form("add_games"):
         titles = st.text_area("Titles", height=220, placeholder="Hades\nOuter Wilds\nBalatro")
         destination = st.radio("Add to", ["Backlog", "Played", "Abandoned"], horizontal=True)
         selected_tags = st.multiselect("Initial Tags", list(label_to_id))
         ready = st.checkbox("Mark as ready to play", disabled=destination != "Backlog")
-        enrich = st.checkbox("Fetch details and cover automatically", value=has_rawg, disabled=not has_rawg)
+        enrich = st.checkbox("Auto-fetch details", value=has_providers, disabled=not has_providers)
         submitted = st.form_submit_button("Add Games", type="primary")
     if not submitted:
         return
@@ -530,12 +561,9 @@ def add_games_page() -> None:
         created.append((game_id, title))
     messages: list[str] = []
     if enrich and created:
-        progress = st.progress(0, text="Buscando metadatos en RAWG…")
+        progress = st.progress(0, text="Buscando metadatos en proveedores…")
         for number, (game_id, title) in enumerate(created, start=1):
-            try:
-                messages.append(f"{title}: {enrich_one(game_id, title)}")
-            except ProviderError as exc:
-                messages.append(f"{title}: {exc}")
+            messages.append(f"{title}: {enrich_one(game_id, title)}")
             progress.progress(number / len(created), text=f"Enriqueciendo {number} de {len(created)}…")
         progress.empty()
     st.success(f"Added {len(created)} game(s).")
@@ -551,12 +579,25 @@ def configuration_page() -> None:
     connection_tab, tags_tab, enrichment_tab, export_tab = st.tabs(["Connections", "Tags", "Enrichment"ualizar catálogo", "Exportar"])
     with connection_tab:
         st.subheader("Servicios optionales")
-        st.caption("The application works without external services; RAWG se consulta sólo al pedirlo.")
+        st.caption("The application works without external services; los proveedores se consultan sólo al pedirlo.")
         with st.form("connections"):
+            current_val = db.get_setting("provider_priority", "IGDB,RAWG")
+            default_selection = [p for p in current_val.split(",") if p in ["IGDB", "RAWG"]]
+            
+            provider_order_list = st.multiselect(
+                "Orden de prioridad de proveedores (selecciona en orden de preferencia)", 
+                options=["IGDB", "RAWG"], 
+                default=default_selection
+            )
             rawg_key = st.text_input("Key de API de RAWG", value=db.get_setting("rawg_api_key"), type="password")
+            igdb_id = st.text_input("Client ID de IGDB", value=db.get_setting("igdb_client_id"))
+            igdb_secret = st.text_input("Client Secret de IGDB", value=db.get_setting("igdb_client_secret"), type="password")
             saved = st.form_submit_button("Save configuration")
         if saved:
+            db.set_setting("provider_priority", ",".join(provider_order_list))
             db.set_setting("rawg_api_key", rawg_key.strip())
+            db.set_setting("igdb_client_id", igdb_id.strip())
+            db.set_setting("igdb_client_secret", igdb_secret.strip())
             st.success("Settings guardada localmente.")
     with tags_tab:
         st.subheader("Catálogo de tags personales")
@@ -592,12 +633,18 @@ def configuration_page() -> None:
     with enrichment_tab:
         st.subheader("Update missing data")
         games = db.list_games()
-        if not db.get_setting("rawg_api_key"):
-            st.info("Configure a RAWG API key first in Connections.")
+        if not get_ordered_providers():
+            st.info("Configure a provider first (IGDB or RAWG) in Connections.")
         elif not games:
             st.info("No games to update.")
         else:
-            missing_info = [g for g in games if not g.get("external_metadata_json")]
+            # Re-check what counts as missing info. In this new architecture, if they aren't in game_provider_data
+            missing_info = []
+            with db.connection() as conn:
+                for g in games:
+                    prov = conn.execute("SELECT 1 FROM game_provider_data WHERE game_id = ?", (g["id"],)).fetchone()
+                    if not prov:
+                        missing_info.append(g)
             
             c1, c2 = st.columns(2)
             c1.metric("Games in library", len(games))

@@ -93,17 +93,11 @@ def init_database() -> None:
                 notes TEXT,
                 added_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                rawg_id INTEGER,
-                rawg_slug TEXT,
                 release_date TEXT,
                 cover_local_path TEXT,
                 cover_source_url TEXT,
-                developers_json TEXT,
-                genres_json TEXT,
-                rawg_tags_json TEXT,
                 metadata_source TEXT,
                 metadata_updated_at TEXT,
-                external_metadata_json TEXT,
                 developer_info_json TEXT
             );
 
@@ -360,7 +354,10 @@ def create_game(
 
 
 def _set_game_tags(conn: sqlite3.Connection, game_id: int, tag_ids: Sequence[int]) -> None:
-    conn.execute("DELETE FROM game_tags WHERE game_id = ?", (game_id,))
+    conn.execute(
+        "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 1)",
+        (game_id,)
+    )
     conn.executemany(
         "INSERT OR IGNORE INTO game_tags(game_id, tag_id) VALUES (?, ?)",
         [(game_id, tag_id) for tag_id in tag_ids],
