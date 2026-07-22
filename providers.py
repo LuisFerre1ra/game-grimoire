@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +104,29 @@ def _get_igdb_token(client_id: str, client_secret: str) -> str:
     db.set_setting("igdb_access_token", token)
     return token
 
+_igdb_request_times = deque(maxlen=4)
+
+def _igdb_post(url: str, headers: dict, data: str, timeout: int = 20):
+    max_retries = 3
+    for attempt in range(max_retries):
+        now = time.time()
+        if len(_igdb_request_times) == 4:
+            oldest = _igdb_request_times[0]
+            elapsed = now - oldest
+            if elapsed < 1.1:
+                time.sleep(1.1 - elapsed)
+        _igdb_request_times.append(time.time())
+
+        response = requests.post(url, headers=headers, data=data, timeout=timeout)
+        if response.status_code == 429:
+            time.sleep(2)
+            continue
+        
+        response.raise_for_status()
+        return response
+    
+    raise requests.RequestException("IGDB request limit exceeded (429 Too Many Requests).")
+
 class IGDBProvider(MetadataProvider):
     def __init__(self, client_id: str, client_secret: str):
         self.client_id = client_id.strip()
@@ -121,9 +146,8 @@ class IGDBProvider(MetadataProvider):
 
     def search(self, query: str) -> list[UnifiedGameData]:
         q = f'search "{query}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 10;'
-        response = requests.post(self.base_url, headers=self.headers, data=q, timeout=20)
         try:
-            response.raise_for_status()
+            response = _igdb_post(self.base_url, headers=self.headers, data=q, timeout=20)
         except requests.RequestException as exc:
             raise ProviderError(f"Error searching IGDB: {exc}") from exc
         
@@ -137,9 +161,8 @@ class IGDBProvider(MetadataProvider):
         else:
             q = f'where slug = "{provider_game_id}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 1;'
             
-        response = requests.post(self.base_url, headers=self.headers, data=q, timeout=20)
         try:
-            response.raise_for_status()
+            response = _igdb_post(self.base_url, headers=self.headers, data=q, timeout=20)
         except requests.RequestException as exc:
             raise ProviderError(f"Error fetching IGDB game details: {exc}") from exc
         
