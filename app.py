@@ -18,8 +18,6 @@ st.set_page_config(page_title="My Game Library", layout="wide")
 db.init_database()
 
 STATUS_LABELS = {"backlog": "Backlog", "played": "Played", "abandoned": "Abandoned"}
-STATUS_TAGS = {"Unreleased", "Early Access"}
-WARNING_TAGS = {"Malas reseñas", "Reseñas variadas", "No anda"}
 
 
 def inject_styles() -> None:
@@ -121,16 +119,12 @@ def tag_html(tags: Iterable[str], limit: int = 4, show_empty: bool = True) -> st
     chips = []
     for name in shown:
         color = name_to_color.get(name, "#27374d")
-        if name in WARNING_TAGS:
-            color = "#ef4444"
         chips.append(f'<span class="tag-chip" style="background-color: {color}; white-space: nowrap; text-overflow: ellipsis; max-width: 150px; overflow: hidden;">{name}</span>')
         
     if hidden:
         hidden_chips = []
         for name in hidden:
             h_color = name_to_color.get(name, "#27374d")
-            if name in WARNING_TAGS:
-                h_color = "#ef4444"
             hidden_chips.append(f'<span class="tag-chip" style="background-color: {h_color}; margin-bottom: 0.2rem;">{name}</span>')
             
         hidden_html = "".join(hidden_chips)
@@ -379,8 +373,11 @@ def render_card(item: dict[str, Any], prefix: str) -> None:
         else:
             st.markdown('<div class="game-placeholder">Sin cover</div>', unsafe_allow_html=True)
             st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
-        special_tags = [t for t in item["tags"] if t in STATUS_TAGS or t in WARNING_TAGS]
-        normal_tags = [t for t in item["tags"] if t not in STATUS_TAGS and t not in WARNING_TAGS]
+            
+        all_tags = db.list_tags()
+        main_tags_names = {t["name"] for t in all_tags if t.get("is_main")}
+        special_tags = [t for t in item["tags"] if t in main_tags_names]
+        normal_tags = [t for t in item["tags"] if t not in main_tags_names]
         
         if special_tags:
             st.markdown(f"<div class='special-tags-container'>{tag_html(special_tags, limit=10, show_empty=False)}</div>", unsafe_allow_html=True)
@@ -657,10 +654,11 @@ def configuration_page() -> None:
             name = one.text_input("Name")
             category = two.selectbox("Category", ["Status", "Reviews", "Mode", "Requirement", "Compatibility", "Other"])
             color = three.color_picker("Color", "#7E8996")
+            is_main = st.checkbox("Main tag (featured over cover)")
             added = st.form_submit_button("Create tag")
         if added:
             try:
-                db.add_tag(name, category, color); st.success("Tag created."); st.rerun()
+                db.add_tag(name, category, color, is_main); st.success("Tag created."); st.rerun()
             except Exception as exc:
                 st.error(f"Could not create: {exc}")
         all_tags = db.list_tags()
@@ -671,12 +669,13 @@ def configuration_page() -> None:
                 name = st.text_input("Tag name", selected["name"])
                 category = st.text_input("Category", selected["category"])
                 color = st.color_picker("Color", selected["color"])
+                is_main = st.checkbox("Main tag (featured over cover)", value=bool(selected.get("is_main", 0)))
                 save_tag, remove_tag = st.columns(2)
                 save_clicked = save_tag.form_submit_button("Save tag")
                 delete_clicked = remove_tag.form_submit_button("Delete tag")
             try:
                 if save_clicked:
-                    db.update_tag(selected["id"], name, category, color); st.success("Tag updated."); st.rerun()
+                    db.update_tag(selected["id"], name, category, color, is_main); st.success("Tag updated."); st.rerun()
                 if delete_clicked:
                     db.delete_tag(selected["id"]); st.success("Tag deleted."); st.rerun()
             except Exception as exc:
