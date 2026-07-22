@@ -18,6 +18,8 @@ st.set_page_config(page_title="My Game Library", layout="wide")
 db.init_database()
 
 STATUS_LABELS = {"backlog": "Backlog", "played": "Played", "abandoned": "Abandoned"}
+STATUS_TAGS = {"Unreleased", "Early Access"}
+WARNING_TAGS = {"Malas reseñas", "Reseñas variadas", "No anda"}
 
 
 def inject_styles() -> None:
@@ -25,13 +27,13 @@ def inject_styles() -> None:
         """
         <style>
           .block-container { max-width: 1500px; padding-top: 1.4rem; }
-          .game-placeholder {height:168px; display:flex; flex-direction:column; align-items:center;
+          .game-placeholder {aspect-ratio: 3 / 4; width: 100%; display:flex; flex-direction:column; align-items:center;
             justify-content:center; border-radius:.55rem; color:#d7e3f5; background:linear-gradient(145deg,#24334d,#121b2b); font-size:.9rem;}
           .game-placeholder small {font-size:.78rem; margin-top:.55rem; color:#aebed2;}
           .tag-chip {display:inline-block; margin:.2rem .4rem .2rem 0; padding:.1rem .45rem; border-radius:999px;
             background:#27374d; color:#e6eefb; font-size:.78rem;}
           .muted {color:#9aa8ba; font-size:.86rem;}
-          div[data-testid="stImage"] img {height:168px !important; width:100% !important; object-fit:cover; border-radius:.55rem;}
+          div[data-testid="stImage"] img {aspect-ratio: 3 / 4 !important; width:100% !important; height: auto !important; object-fit:cover; border-radius:.55rem;}
           div[data-testid="stFullScreenFrame"] > div > div:first-child {padding: 0.5rem; top: 0 !important;}
           div[data-testid="stPopover"] button div[data-testid="stMarkdownContainer"] {display: none;}
           button[data-testid="stPopoverButton"] > div {margin-right:0;}
@@ -41,6 +43,18 @@ def inject_styles() -> None:
           div[data-testid="stPopoverBody"] .element-container { margin-bottom: 0 !important; }
           div[data-testid="stPopoverBody"] button { margin: 0 !important; padding: 0.35rem 1rem !important; min-height: 2.2rem !important; text-align: left !important; }
           div[data-testid="stPopoverBody"] button > div { justify-content: flex-start !important; }
+          div[data-testid="stColumn"]:has(.special-tags-container) {
+            position: relative;
+            container-type: inline-size;
+          }
+          div[data-testid="stElementContainer"]:has(.special-tags-container) {
+            position: absolute;
+            width: calc(100% + 2px - 2rem - 20px);
+            top: calc((100cqw + 2px - 2rem)*4/3);
+            margin: 10px;
+            transform: translateY(calc(-100% - 20px));
+            z-index: 10;
+          }
           /* Custom Sidebar Navigation */
           [data-testid="stSidebar"] {
             background-color: #0b1423;
@@ -96,9 +110,10 @@ def cover_reference(item: dict[str, Any]) -> str | None:
     return item.get("cover_source_url")
 
 
-def tag_html(tags: Iterable[str], limit: int = 4) -> str:
+def tag_html(tags: Iterable[str], limit: int = 4, show_empty: bool = True) -> str:
     names = list(tags)
-    shown = names[:limit] + ([f"+{len(names) - limit}"] if len(names) > limit else [])
+    shown = names[:limit]
+    hidden = names[limit:]
     
     all_tags = db.list_tags()
     name_to_color = {t["name"]: t["color"] for t in all_tags}
@@ -106,9 +121,36 @@ def tag_html(tags: Iterable[str], limit: int = 4) -> str:
     chips = []
     for name in shown:
         color = name_to_color.get(name, "#27374d")
-        chips.append(f'<span class="tag-chip" style="background-color: {color};">{name}</span>')
+        if name in WARNING_TAGS:
+            color = "#ef4444"
+        chips.append(f'<span class="tag-chip" style="background-color: {color}; white-space: nowrap; text-overflow: ellipsis; max-width: 150px; overflow: hidden;">{name}</span>')
         
-    return "".join(chips) or '<span class="muted">No tags</span>'
+    if hidden:
+        hidden_chips = []
+        for name in hidden:
+            h_color = name_to_color.get(name, "#27374d")
+            if name in WARNING_TAGS:
+                h_color = "#ef4444"
+            hidden_chips.append(f'<span class="tag-chip" style="background-color: {h_color}; margin-bottom: 0.2rem;">{name}</span>')
+            
+        hidden_html = "".join(hidden_chips)
+        
+        details_html = f'''
+        <style>details > summary.overflow-chip::-webkit-details-marker {{ display: none; }}</style>
+        <details style="display: inline-block; position: relative;">
+            <summary class="tag-chip overflow-chip" style="background-color: #4a5568; flex-shrink: 0; cursor: pointer; list-style: none;">+{len(hidden)}</summary>
+            <div style="position: absolute; bottom: 120%; right: 0; background: #0b1423; padding: 0.5rem; border: 1px solid #1a2536; border-radius: 0.4rem; z-index: 9999; display: flex; flex-wrap: wrap; width: max-content; max-width: 220px; box-shadow: 0 4px 6px rgba(0,0,0,0.5);">
+                {hidden_html}
+            </div>
+        </details>
+        '''
+        chips.append(details_html)
+        
+    if not chips and not show_empty:
+        return ""
+        
+    inner_html = "".join(chips) or '<span class="muted">No tags</span>'
+    return f'<div style="display: flex; flex-wrap: nowrap; align-items: center; width: 100%;">{inner_html}</div>'
 
 
 def queue_dialog(kind: str, game_id: int) -> None:
@@ -314,36 +356,45 @@ def show_pending_dialog() -> None:
 
 
 def game_actions(item: dict[str, Any], prefix: str) -> None:
-    if st.session_state.get("dialog"):
-        st.button("", help="Actions", disabled=True, use_container_width=True, key=f"{prefix}_disabled")
-        return
+    col1, col2 = st.columns([4, 1])
         
-    with st.popover("", help="Actions", use_container_width=True):
-        for kind, label in [("edit", "Edit"), ("status", "Change status"), ("metadata", "Ver details"), ("enrich", "Completar información"), ("clear_metadata", "Limpiar details"), ("delete", "Delete")]:
-            if st.button(label, key=f"{prefix}_{kind}", type="tertiary", use_container_width=True):
-                queue_dialog(kind, item["id"])
-                st.rerun()
+    enrich_label = "Reemplazar información" if item.get("metadata_source") or item.get("release_date") else "Completar información"
+        
+    with col1:
+        st.button("Details", key=f"{prefix}_details", type="primary", use_container_width=True, on_click=queue_dialog, args=("metadata", item["id"]))
+
+    with col2:
+        is_active_dialog = st.session_state.get("dialog") and st.session_state["dialog"]["game_id"] == item["id"]
+        popover_key = f"{prefix}_popover_{'open' if is_active_dialog else 'closed'}"
+        with st.popover("⋮", help="Actions", use_container_width=True, key=popover_key):
+            for kind, label in [("edit", "Edit"), ("status", "Change status"), ("enrich", enrich_label), ("clear_metadata", "Limpiar details"), ("delete", "Delete")]:
+                st.button(label, key=f"{prefix}_{kind}", type="tertiary", use_container_width=True, on_click=queue_dialog, args=(kind, item["id"]))
 
 
 def render_card(item: dict[str, Any], prefix: str) -> None:
-    with st.container(height=355, border=True):
+    with st.container(border=True):
         cover = cover_reference(item)
         if cover:
             st.image(cover, width="stretch")
         else:
             st.markdown('<div class="game-placeholder">Sin cover</div>', unsafe_allow_html=True)
             st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
-        left, right = st.columns([5, 2])
+        special_tags = [t for t in item["tags"] if t in STATUS_TAGS or t in WARNING_TAGS]
+        normal_tags = [t for t in item["tags"] if t not in STATUS_TAGS and t not in WARNING_TAGS]
+        
+        if special_tags:
+            st.markdown(f"<div class='special-tags-container'>{tag_html(special_tags, limit=10, show_empty=False)}</div>", unsafe_allow_html=True)
+            
         safe_title = item["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-        title_html = f'<div title="{safe_title}" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: bold; line-height: 1.4; max-height: 2.8em; margin-bottom: 0.5rem;">{safe_title}</div>'
-        left.markdown(title_html, unsafe_allow_html=True)
-        with right:
-            game_actions(item, prefix)
+        title_html = f'<div title="{safe_title}" style="display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-weight: bold; line-height: 1.4; height: 1.4em; margin-bottom: 0.5rem;">{safe_title}</div>'
+        st.markdown(title_html, unsafe_allow_html=True)
+        
         detail = format_hours(item.get("hours"))
         if item["status"] == "backlog" and item["ready_to_play"]:
             detail += " · Ready to play"
-        st.caption(detail)
-        st.markdown(tag_html(item["tags"]), unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size: 0.86rem; color: #9aa8ba; margin-bottom: 0.3rem;'>{detail}</div>", unsafe_allow_html=True)
+        st.markdown(tag_html(normal_tags, limit=2) + "<div style='margin-bottom: 0.6rem;'></div>", unsafe_allow_html=True)
+        game_actions(item, prefix)
 
 
 def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
