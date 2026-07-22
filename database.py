@@ -18,15 +18,15 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "game_library.db"
 
 DEFAULT_TAGS = [
-    ("Early Access", "Status", "#E0A84A"),
-    ("Negative Reviews", "Reviews", "#D95D5D"),
-    ("Mixed Reviews", "Reviews", "#DB8B4A"),
-    ("Mod Required", "Requirement", "#8E6CD1"),
-    ("Multiplayer", "Mode", "#4389D7"),
-    ("Unreleased", "Status", "#8C8C8C"),
-    ("Incomplete Content", "Status", "#A8745A"),
-    ("Unplayable", "Compatibility", "#CC4F6A"),
-    ("Uncategorized", "Other", "#7E8996"),
+    ("Early Access", "Status", "#E0A84A", 1),
+    ("Negative Reviews", "Reviews", "#D95D5D", 1),
+    ("Mixed Reviews", "Reviews", "#DB8B4A", 1),
+    ("Mod Required", "Requirement", "#8E6CD1", 0),
+    ("Multiplayer", "Mode", "#4389D7", 0),
+    ("Unreleased", "Status", "#8C8C8C", 1),
+    ("Incomplete Content", "Status", "#A8745A", 1),
+    ("Unplayable", "Compatibility", "#CC4F6A", 1),
+    ("Uncategorized", "Other", "#7E8996", 0),
 ]
 
 
@@ -80,6 +80,7 @@ def init_database() -> None:
                 color TEXT NOT NULL DEFAULT '#7E8996',
                 parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
                 is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0, 1)),
+                is_main INTEGER NOT NULL DEFAULT 0 CHECK(is_main IN (0, 1)),
                 created_at TEXT NOT NULL
             );
 
@@ -169,6 +170,11 @@ def init_database() -> None:
         except sqlite3.OperationalError:
             pass
         try:
+            conn.execute("ALTER TABLE tags ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0 CHECK(is_main IN (0, 1))")
+            conn.execute("UPDATE tags SET is_main = 1 WHERE name IN ('Early Access', 'Unreleased', 'Incomplete content', 'Unplayable')")
+        except sqlite3.OperationalError:
+            pass
+        try:
             conn.execute("ALTER TABLE games ADD COLUMN developer_info_json TEXT")
         except sqlite3.OperationalError:
             pass
@@ -179,10 +185,10 @@ def init_database() -> None:
         stamp = now_iso()
         conn.executemany(
             """
-            INSERT OR IGNORE INTO tags(name, category, color, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO tags(name, category, color, is_main, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            [(name, category, color, stamp) for name, category, color in DEFAULT_TAGS],
+            [(name, category, color, is_main, stamp) for name, category, color, is_main in DEFAULT_TAGS],
         )
 
 def migrate_phase1() -> None:
@@ -278,37 +284,37 @@ def list_tags() -> list[dict[str, Any]]:
         ]
 
 
-def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996", parent_id: int | None = None, is_custom: bool = False) -> int:
+def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996", parent_id: int | None = None, is_custom: bool = False, is_main: bool = False) -> int:
     clean_name = name.strip()
     with connection() as conn:
         row = conn.execute("SELECT id FROM tags WHERE name = ?", (clean_name,)).fetchone()
         if row:
             return row["id"]
         cursor = conn.execute(
-            "INSERT INTO tags(name, category, color, parent_id, is_custom, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (clean_name, category, color, parent_id, int(is_custom), now_iso())
+            "INSERT INTO tags(name, category, color, parent_id, is_custom, is_main, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (clean_name, category, color, parent_id, int(is_custom), int(is_main), now_iso())
         )
         return cursor.lastrowid
 
 
-def add_tag(name: str, category: str = "Other", color: str = "#7E8996") -> None:
+def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main: bool = False) -> None:
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Tag requires a name.")
     with connection() as conn:
         conn.execute(
-            "INSERT INTO tags(name, category, color, is_custom, created_at) VALUES (?, ?, ?, 1, ?)",
-            (clean_name, category.strip() or "Other", color, now_iso()),
+            "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, 1, ?, ?)",
+            (clean_name, category.strip() or "Other", color, int(is_main), now_iso()),
         )
 
 
-def update_tag(tag_id: int, name: str, category: str, color: str) -> None:
+def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False) -> None:
     if not name.strip():
         raise ValueError("Tag requires a name.")
     with connection() as conn:
         conn.execute(
-            "UPDATE tags SET name = ?, category = ?, color = ? WHERE id = ?",
-            (name.strip(), category.strip() or "Other", color, tag_id),
+            "UPDATE tags SET name = ?, category = ?, color = ?, is_main = ? WHERE id = ?",
+            (name.strip(), category.strip() or "Other", color, int(is_main), tag_id),
         )
 
 
