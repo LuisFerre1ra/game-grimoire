@@ -81,6 +81,22 @@ def inject_styles() -> None:
             border-radius: 0 0.4rem 0.4rem 0;
             font-weight: bold;
           }
+          
+          /* Red style for delete buttons using wrapper */
+          div[data-testid="stElementContainer"]:has(.delete-btn-wrapper) {
+              display: none;
+          }
+          div[data-testid="stElementContainer"]:has(.delete-btn-wrapper) + div[data-testid="stElementContainer"] button {
+              background-color: #271216 !important;
+              color: #ef4444 !important;
+              border: 1px solid #6b2228 !important;
+              transition: all 0.2s ease;
+          }
+          div[data-testid="stElementContainer"]:has(.delete-btn-wrapper) + div[data-testid="stElementContainer"] button:hover {
+              background-color: #ef4444 !important;
+              color: #ffffff !important;
+              border: 1px solid #ef4444 !important;
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -240,6 +256,23 @@ def clear_metadata_dialog(game_id: int) -> None:
         st.rerun()
 
 
+@st.dialog("Delete tag", on_dismiss=dismiss_dialog)
+def delete_tag_dialog(tag_id: int) -> None:
+    all_tags = db.list_tags()
+    tag = next((t for t in all_tags if t["id"] == tag_id), None)
+    if not tag:
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    st.warning(f"Are you sure you want to delete tag **{tag['name']}**? Games associated with it will lose it and this action cannot be undone.")
+    left, right = st.columns(2)
+    if left.button("Delete tag", type="primary", use_container_width=True):
+        db.delete_tag(tag_id)
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    if right.button("Cancel", use_container_width=True):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
 @st.dialog("Game details", on_dismiss=dismiss_dialog, width="large")
 def metadata_dialog(game_id: int) -> None:
     item = db.get_game(game_id)
@@ -346,7 +379,7 @@ def enrich_game_dialog(game_id: int) -> None:
 def show_pending_dialog() -> None:
     active = st.session_state.get("dialog")
     if active:
-        {"edit": edit_game_dialog, "status": status_dialog, "delete": delete_game_dialog, "metadata": metadata_dialog, "enrich": enrich_game_dialog, "clear_metadata": clear_metadata_dialog}[active["kind"]](active["game_id"])
+        {"edit": edit_game_dialog, "status": status_dialog, "delete": delete_game_dialog, "metadata": metadata_dialog, "enrich": enrich_game_dialog, "clear_metadata": clear_metadata_dialog, "delete_tag": delete_tag_dialog}[active["kind"]](active["game_id"])
 
 
 def game_actions(item: dict[str, Any], prefix: str) -> None:
@@ -648,38 +681,83 @@ def configuration_page() -> None:
             db.set_setting("igdb_client_secret", igdb_secret.strip())
             st.success("Settings guardada localmente.")
     with tags_tab:
-        st.subheader("Catálogo de tags personales")
-        with st.form("new_tag", clear_on_submit=True):
-            one, two, three = st.columns([2, 2, 1])
-            name = one.text_input("Name")
-            category = two.selectbox("Category", ["Status", "Reviews", "Mode", "Requirement", "Compatibility", "Other"])
-            color = three.color_picker("Color", "#7E8996")
-            is_main = st.checkbox("Main tag (featured over cover)")
-            added = st.form_submit_button("Create tag")
-        if added:
-            try:
-                db.add_tag(name, category, color, is_main); st.success("Tag created."); st.rerun()
-            except Exception as exc:
-                st.error(f"Could not create: {exc}")
+        st.subheader("Catálogo de tags")
+        
         all_tags = db.list_tags()
-        if all_tags:
-            choices = {f"{tag['name']} · {tag['category']}": tag for tag in all_tags}
-            selected = choices[st.selectbox("Edit tag", list(choices))]
-            with st.form("edit_tag"):
-                name = st.text_input("Tag name", selected["name"])
-                category = st.text_input("Category", selected["category"])
-                color = st.color_picker("Color", selected["color"])
-                is_main = st.checkbox("Main tag (featured over cover)", value=bool(selected.get("is_main", 0)))
-                save_tag, remove_tag = st.columns(2)
-                save_clicked = save_tag.form_submit_button("Save tag")
-                delete_clicked = remove_tag.form_submit_button("Delete tag")
+        existing_cats = sorted(list(set(t["category"] for t in all_tags if t.get("category"))))
+        if not existing_cats:
+            existing_cats = ["Status", "Reviews", "Mode", "Requirement", "Compatibility", "Other"]
+        cat_options = existing_cats + ["+ New category..."]
+        
+        if st.button("+ Add new tag", type="primary"):
             try:
-                if save_clicked:
-                    db.update_tag(selected["id"], name, category, color, is_main); st.success("Tag updated."); st.rerun()
-                if delete_clicked:
-                    db.delete_tag(selected["id"]); st.success("Tag deleted."); st.rerun()
+                import time
+                db.add_tag(f"New tag {int(time.time() * 1000) % 10000}", "Other", "#7E8996", False)
+                st.rerun()
             except Exception as exc:
-                st.error(f"Could not modify tag: {exc}")
+                st.error(f"Error al create: {exc}")
+                
+        all_tags = db.list_tags()
+        
+        if "tag_order" not in st.session_state:
+            st.session_state["tag_order"] = [t["id"] for t in all_tags]
+            
+        known_ids = set(st.session_state["tag_order"])
+        new_order = list(st.session_state["tag_order"])
+        
+        # Enforce that newly created tags are pushed to the absolute top of the order
+        for t in all_tags:
+            if t["id"] not in known_ids:
+                new_order.insert(0, t["id"])
+                known_ids.add(t["id"])
+                
+        # Force Streamlit to recognize the state mutation
+        st.session_state["tag_order"] = new_order
+        
+        order_map = {tid: i for i, tid in enumerate(st.session_state["tag_order"])}
+        all_tags.sort(key=lambda t: order_map.get(t["id"], 999999))
+        if all_tags:
+            h1, h2, h3, h4, h5 = st.columns([4, 4, 0.6, 0.8, 1.1])
+            h1.markdown("**Name**")
+            h2.markdown("**Category**")
+            h3.markdown("**Color**")
+            h4.markdown("<div style='text-align: center; font-weight: bold;'>Principal</div>", unsafe_allow_html=True)
+            h5.markdown("<div style='text-align: center; font-weight: bold;'>Acción</div>", unsafe_allow_html=True)
+            
+            for tag in all_tags:
+                c1, c2, c3, c4, c5 = st.columns([4, 4, 0.6, 0.8, 1.1])
+                t_id = tag["id"]
+                new_name = c1.text_input("Name", value=tag["name"], key=f"t_name_{t_id}", label_visibility="collapsed")
+                
+                current_cat = tag["category"]
+                cat_idx = cat_options.index(current_cat) if current_cat in cat_options else 0
+                cat_val = c2.selectbox("Category", cat_options, index=cat_idx, key=f"t_cat_sel_{t_id}", label_visibility="collapsed")
+                if cat_val == "+ New category...":
+                    new_cat = c2.text_input("New category", value="", key=f"t_cat_new_{t_id}", label_visibility="collapsed", placeholder="Escribe aquí...")
+                else:
+                    new_cat = cat_val
+                
+                effective_cat = tag["category"] if (cat_val == "+ New category..." and not new_cat.strip()) else new_cat.strip()
+                
+                new_color = c3.color_picker("Color", value=tag["color"], key=f"t_col_{t_id}", label_visibility="collapsed")
+                
+                with c4:
+                    _, c_chk, _ = st.columns([1, 1.5, 1])
+                    new_main = c_chk.checkbox("Sí", value=bool(tag.get("is_main", 0)), key=f"t_main_{t_id}", label_visibility="collapsed")
+                
+                with c5:
+                    st.markdown('<div class="delete-btn-wrapper"></div>', unsafe_allow_html=True)
+                    if st.button("Delete", key=f"del_{t_id}", type="secondary", use_container_width=True):
+                        queue_dialog("delete_tag", t_id)
+                
+                changed = (new_name != tag["name"] or effective_cat != tag["category"] or new_color != tag["color"] or new_main != bool(tag.get("is_main", 0)))
+                
+                if changed:
+                    try:
+                        db.update_tag(t_id, new_name, effective_cat, new_color, new_main)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
     with enrichment_tab:
         st.subheader("Update missing data")
         games = db.list_games()
@@ -747,6 +825,8 @@ def main() -> None:
         st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Library</h2>", unsafe_allow_html=True)
         for p in pages:
             if st.button(p, key=f"nav_{p}", use_container_width=True, type="primary" if page == p else "secondary"):
+                if p != "Settings" and "tag_order" in st.session_state:
+                    del st.session_state["tag_order"]
                 st.session_state["page"] = p
                 st.rerun()
     if page == "Backlog": inventory_page("Backlog", ["backlog"], "backlog")
