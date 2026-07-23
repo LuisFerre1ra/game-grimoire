@@ -7,6 +7,7 @@ import mimetypes
 import time
 from collections import deque
 from pathlib import Path
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 import requests
@@ -125,18 +126,36 @@ class RAWGProvider(MetadataProvider):
         )
 
 
+def _clear_igdb_token() -> None:
+    """Remove cached IGDB token and its expiry from settings."""
+    db.set_setting("igdb_access_token", "")
+    db.set_setting("igdb_token_expires_at", "")
+
+
 def _get_igdb_token(client_id: str, client_secret: str) -> str:
     token = db.get_setting("igdb_access_token")
-    if token:
-        return token
+    expires_at = db.get_setting("igdb_token_expires_at")
+    if token and expires_at:
+        try:
+            if datetime.fromisoformat(expires_at) > datetime.now(tz=UTC):
+                return token
+        except (ValueError, TypeError):
+            pass
+        # Token expired or expiry unparseable – clear and re-fetch
+        _clear_igdb_token()
+
     url = f"https://id.twitch.tv/oauth2/token?client_id={client_id}&client_secret={client_secret}&grant_type=client_credentials"
     resp = requests.post(url, timeout=20)
     if not resp.ok:
         raise ProviderError("Could not obtain IGDB token with given credentials.")
-    token = resp.json().get("access_token")
+    data = resp.json()
+    token = data.get("access_token")
     if not token:
         raise ProviderError("Respuesta de token IGDB inválida.")
+    expires_in = data.get("expires_in", 0)
+    expires_at_dt = datetime.now(tz=UTC) + timedelta(seconds=expires_in)
     db.set_setting("igdb_access_token", token)
+    db.set_setting("igdb_token_expires_at", expires_at_dt.isoformat())
     return token
 
 _igdb_request_times = deque(maxlen=4)
@@ -169,12 +188,35 @@ class IGDBProvider(MetadataProvider):
         if not self.client_id or not self.client_secret:
             raise ProviderError("Configure the IGDB Client ID and Secret first.")
         self.token = _get_igdb_token(self.client_id, self.client_secret)
+        self._build_headers()
+        self.base_url = "https://api.igdb.com/v4/games"
+
+    def _build_headers(self) -> None:
         self.headers = {
             "Client-ID": self.client_id,
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json"
         }
-        self.base_url = "https://api.igdb.com/v4/games"
+
+    def _request(self, url: str, body: str, timeout: int = 20) -> requests.Response:
+        """POST to IGDB with retry-on-401 (re-authenticate once)."""
+        try:
+            response = _igdb_post(url, headers=self.headers, data=body, timeout=timeout)
+        except requests.RequestException as exc:
+            # Check if the underlying response was a 401
+            if hasattr(exc, 'response') and exc.response is not None and exc.response.status_code == 401:
+                _clear_igdb_token()
+                self.token = _get_igdb_token(self.client_id, self.client_secret)
+                self._build_headers()
+                response = _igdb_post(url, headers=self.headers, data=body, timeout=timeout)
+            else:
+                raise
+        if response.status_code == 401:
+            _clear_igdb_token()
+            self.token = _get_igdb_token(self.client_id, self.client_secret)
+            self._build_headers()
+            response = _igdb_post(url, headers=self.headers, data=body, timeout=timeout)
+        return response
 
     def get_name(self) -> str:
         return "IGDB"
@@ -182,7 +224,7 @@ class IGDBProvider(MetadataProvider):
     def search(self, query: str) -> list[UnifiedGameData]:
         q = f'search "{query}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 10;'
         try:
-            response = _igdb_post(self.base_url, headers=self.headers, data=q, timeout=20)
+            response = self._request(self.base_url, q, timeout=20)
         except requests.RequestException as exc:
             raise ProviderError(f"Error searching IGDB: {exc}") from exc
         
@@ -197,7 +239,7 @@ class IGDBProvider(MetadataProvider):
             q = f'where slug = "{provider_game_id}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 1;'
             
         try:
-            response = _igdb_post(self.base_url, headers=self.headers, data=q, timeout=20)
+            response = self._request(self.base_url, q, timeout=20)
         except requests.RequestException as exc:
             raise ProviderError(f"Error fetching IGDB game details: {exc}") from exc
         
@@ -223,11 +265,10 @@ class IGDBProvider(MetadataProvider):
             if not cover_url.startswith("http"):
                 cover_url = "https:" + cover_url
 
-        from datetime import datetime
         release_date = None
         if data.get("first_release_date"):
             try:
-                release_date = datetime.fromtimestamp(data["first_release_date"]).strftime("%Y-%m-%d")
+                release_date = datetime.fromtimestamp(data["first_release_date"], tz=UTC).strftime("%Y-%m-%d")
             except Exception:
                 pass
 
