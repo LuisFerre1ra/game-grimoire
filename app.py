@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -11,7 +12,7 @@ import streamlit as st
 from st_keyup import st_keyup
 
 import database as db
-from providers import ProviderError, cache_cover, RAWGProvider, IGDBProvider
+from providers import ProviderError, cache_cover, RAWGProvider, IGDBProvider, map_raw_tags
 from interfaces import MetadataProvider
 
 
@@ -19,6 +20,12 @@ st.set_page_config(page_title="My Game Library", layout="wide")
 db.init_database()
 
 STATUS_LABELS = {"backlog": "Backlog", "played": "Played", "abandoned": "Abandoned"}
+
+
+@st.cache_data(ttl=30)
+def cached_list_tags() -> list[dict[str, Any]]:
+    """Cached wrapper to avoid re-querying tags on every render."""
+    return db.list_tags()
 
 
 def inject_styles() -> None:
@@ -143,7 +150,7 @@ def tag_html(tags: Iterable[str], limit: int = 4, show_empty: bool = True) -> st
     shown = names[:limit]
     hidden = names[limit:]
     
-    all_tags = db.list_tags()
+    all_tags = cached_list_tags()
     name_to_color = {t["name"]: t["color"] for t in all_tags}
     
     chips = []
@@ -192,7 +199,7 @@ def edit_game_dialog(game_id: int) -> None:
     if not item:
         st.error("Game no longer exists.")
         return
-    tags = db.list_tags()
+    tags = cached_list_tags()
     custom_tags = [t for t in tags if t["is_custom"]]
     label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
     selected_ids = set(db.get_game_tags(game_id))
@@ -272,7 +279,7 @@ def clear_metadata_dialog(game_id: int) -> None:
 
 @st.dialog("Delete tag", on_dismiss=dismiss_dialog)
 def delete_tag_dialog(tag_id: int) -> None:
-    all_tags = db.list_tags()
+    all_tags = cached_list_tags()
     tag = next((t for t in all_tags if t["id"] == tag_id), None)
     if not tag:
         st.session_state.pop("dialog", None)
@@ -281,6 +288,7 @@ def delete_tag_dialog(tag_id: int) -> None:
     left, right = st.columns(2)
     if left.button("Delete tag", type="primary", use_container_width=True):
         db.delete_tag(tag_id)
+        cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         st.rerun()
     if right.button("Cancel", use_container_width=True):
@@ -367,7 +375,7 @@ def metadata_dialog(game_id: int) -> None:
                 if mp.get("dropin"): raw_tags.append("Drop-in/Drop-out")
         
         if raw_tags:
-            from providers import map_raw_tags
+
             _, unmapped = map_raw_tags(raw_tags)
             if unmapped:
                 st.write(f"**Other Tags (Unmapped):** {', '.join(sorted(set(unmapped)))}")
@@ -445,7 +453,7 @@ def render_card(item: dict[str, Any], prefix: str) -> None:
             st.markdown('<div class="game-placeholder">Sin cover</div>', unsafe_allow_html=True)
             st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
             
-        all_tags = db.list_tags()
+        all_tags = cached_list_tags()
         main_tags_names = {t["name"] for t in all_tags if t.get("is_main")}
         special_tags = [t for t in item["tags"] if t in main_tags_names]
         normal_tags = [t for t in item["tags"] if t not in main_tags_names]
@@ -466,7 +474,7 @@ def render_card(item: dict[str, Any], prefix: str) -> None:
 
 
 def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
-    tags = db.list_tags()
+    tags = cached_list_tags()
     with st.container(border=True):
         row1_col1, row1_col2, row1_col3 = st.columns([2, 1, 1], vertical_alignment="bottom")
         with row1_col1:
@@ -648,7 +656,7 @@ def enrich_one(game_id: int, title: str) -> str:
 def add_games_page() -> None:
     st.title("Add Games")
     st.write("Paste one title per line. Duplicates are detected by normalized title.")
-    tags = db.list_tags()
+    tags = cached_list_tags()
     custom_tags = [t for t in tags if t["is_custom"]]
     label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
     has_providers = bool(get_ordered_providers())
@@ -722,7 +730,7 @@ def configuration_page() -> None:
     with tags_tab:
         st.subheader("Catálogo de tags")
         
-        all_tags = db.list_tags()
+        all_tags = cached_list_tags()
         existing_cats = sorted(list(set(t["category"] for t in all_tags if t.get("category"))))
         if not existing_cats:
             existing_cats = ["Status", "Reviews", "Mode", "Requirement", "Compatibility", "Other"]
@@ -730,13 +738,13 @@ def configuration_page() -> None:
         
         if st.button("+ Add new tag", type="primary"):
             try:
-                import time
                 db.add_tag(f"New tag {int(time.time() * 1000) % 10000}", "Other", "#7E8996", False)
+                cached_list_tags.clear()
                 st.rerun()
             except Exception as exc:
                 st.error(f"Error al create: {exc}")
                 
-        all_tags = db.list_tags()
+        all_tags = cached_list_tags()
         
         if "tag_order" not in st.session_state:
             st.session_state["tag_order"] = [t["id"] for t in all_tags]
@@ -797,6 +805,7 @@ def configuration_page() -> None:
                 if changed:
                     try:
                         db.update_tag(t_id, new_name, effective_cat, new_color, new_main, new_aliases)
+                        cached_list_tags.clear()
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
