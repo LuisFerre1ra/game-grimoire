@@ -24,6 +24,36 @@ class ProviderError(RuntimeError):
 from interfaces import UnifiedGameData, MetadataProvider
 import database as db
 
+def map_raw_tags(raw_tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+    mapped = {"Genres": [], "Themes": [], "Game Modes": []}
+    unmapped = []
+    if not raw_tags:
+        return mapped, unmapped
+        
+    placeholders = ",".join(["?"] * len(raw_tags))
+    lower_tags = [r.lower() for r in raw_tags]
+    
+    with db.connection() as conn:
+        rows = conn.execute(
+            f"SELECT a.alias_name, t.name, t.category FROM tag_aliases a JOIN tags t ON a.tag_id = t.id WHERE a.alias_name IN ({placeholders})",
+            lower_tags
+        ).fetchall()
+        
+    found_aliases = {}
+    for r in rows:
+        found_aliases[r["alias_name"]] = (r["name"], r["category"])
+        
+    for raw in raw_tags:
+        lower_raw = raw.lower()
+        if lower_raw in found_aliases:
+            name, cat = found_aliases[lower_raw]
+            if cat in mapped and name not in mapped[cat]:
+                mapped[cat].append(name)
+        else:
+            unmapped.append(raw)
+            
+    return mapped, unmapped
+
 class RAWGProvider(MetadataProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key.strip()
@@ -66,13 +96,16 @@ class RAWGProvider(MetadataProvider):
         return self._map_to_unified(raw_data), raw_data
 
     def _map_to_unified(self, data: dict[str, Any]) -> UnifiedGameData:
-        genres = [g.get("name") for g in data.get("genres", []) if g.get("name")]
-        tags = [t.get("name") for t in data.get("tags", []) if t.get("name")]
         devs = [d.get("name") for d in data.get("developers", []) if d.get("name")]
         pubs = [p.get("name") for p in data.get("publishers", []) if p.get("name")]
         age_ratings = []
         if data.get("esrb_rating") and data["esrb_rating"].get("name"):
             age_ratings.append(f"ESRB: {data['esrb_rating']['name']}")
+            
+        raw_tags = []
+        raw_tags.extend([g.get("name") for g in data.get("genres", []) if g.get("name")])
+        raw_tags.extend([t.get("name") for t in data.get("tags", []) if t.get("name")])
+        mapped, unmapped = map_raw_tags(raw_tags)
         
         return UnifiedGameData(
             provider_id=str(data.get("id", data.get("slug"))),
@@ -83,8 +116,10 @@ class RAWGProvider(MetadataProvider):
             total_rating=data.get("metacritic") or data.get("rating"),
             playtime_hours=data.get("playtime"),
             age_ratings=age_ratings,
-            genres=genres,
-            themes=tags, # Mapping RAWG tags to themes generally
+            genres=mapped.get("Genres", []),
+            themes=mapped.get("Themes", []),
+            game_modes=mapped.get("Game Modes", []),
+            multiplayer_modes=[],
             developers=devs,
             publishers=pubs
         )
@@ -174,10 +209,6 @@ class IGDBProvider(MetadataProvider):
         return self._map_to_unified(raw_data), raw_data
 
     def _map_to_unified(self, data: dict[str, Any]) -> UnifiedGameData:
-        genres = [g.get("name") for g in data.get("genres", []) if g.get("name")]
-        themes = [t.get("name") for t in data.get("themes", []) if t.get("name")]
-        game_modes = [m.get("name") for m in data.get("game_modes", []) if m.get("name")]
-        
         devs = []
         pubs = []
         for inv in data.get("involved_companies", []):
@@ -205,14 +236,19 @@ class IGDBProvider(MetadataProvider):
         }
         game_status = status_map.get(data.get("status"))
 
-        multiplayer = []
-        # Parse boolean subtags
+        raw_tags = []
+        raw_tags.extend([g.get("name") for g in data.get("genres", []) if g.get("name")])
+        raw_tags.extend([t.get("name") for t in data.get("themes", []) if t.get("name")])
+        raw_tags.extend([m.get("name") for m in data.get("game_modes", []) if m.get("name")])
+        
         for mp in data.get("multiplayer_modes", []):
-            if mp.get("campaigncoop"): multiplayer.append("Campaign Co-op")
-            if mp.get("lancoop"): multiplayer.append("LAN Co-op")
-            if mp.get("offlinecoop"): multiplayer.append("Offline Co-op")
-            if mp.get("onlinecoop"): multiplayer.append("Online Co-op")
-            if mp.get("dropin"): multiplayer.append("Drop-in/Drop-out")
+            if mp.get("campaigncoop"): raw_tags.append("Campaign Co-op")
+            if mp.get("lancoop"): raw_tags.append("LAN Co-op")
+            if mp.get("offlinecoop"): raw_tags.append("Offline Co-op")
+            if mp.get("onlinecoop"): raw_tags.append("Online Co-op")
+            if mp.get("dropin"): raw_tags.append("Drop-in/Drop-out")
+
+        mapped, unmapped = map_raw_tags(raw_tags)
 
         return UnifiedGameData(
             provider_id=str(data.get("id")),
@@ -221,12 +257,12 @@ class IGDBProvider(MetadataProvider):
             first_release_date=release_date,
             cover_url=cover_url,
             total_rating=data.get("rating"),
-            playtime_hours=None, # IGDB natively doesn't have a reliable playtime field without external IDs
-            age_ratings=[], # Needs /age_ratings endpoint for full detail, omitted for brevity as they are ENUMs
-            genres=genres,
-            themes=themes,
-            game_modes=game_modes,
-            multiplayer_modes=list(set(multiplayer)),
+            playtime_hours=None,
+            age_ratings=[],
+            genres=mapped.get("Genres", []),
+            themes=mapped.get("Themes", []),
+            game_modes=mapped.get("Game Modes", []),
+            multiplayer_modes=[],
             game_status=game_status,
             developers=devs,
             publishers=pubs

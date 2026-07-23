@@ -306,9 +306,11 @@ def metadata_dialog(game_id: int) -> None:
     age_rating = "—"
     description = "—"
 
+    raw_payload_meta = {}
     if provider_data:
         try:
             meta = json.loads(provider_data["raw_payload_json"])
+            raw_payload_meta = meta
             if provider_data["provider_name"] == "RAWG":
                 description = meta.get("description_raw") or meta.get("description") or "—"
                 esrb = meta.get("esrb_rating")
@@ -347,6 +349,28 @@ def metadata_dialog(game_id: int) -> None:
             st.write(f"**{cat}:** {', '.join(cat_tags)}")
     else:
         st.write("No associated tags.")
+        
+    if raw_payload_meta:
+        raw_tags = []
+        if provider_data["provider_name"] == "RAWG":
+            raw_tags.extend([g.get("name") for g in raw_payload_meta.get("genres", []) if g.get("name")])
+            raw_tags.extend([t.get("name") for t in raw_payload_meta.get("tags", []) if t.get("name")])
+        elif provider_data["provider_name"] == "IGDB":
+            raw_tags.extend([g.get("name") for g in raw_payload_meta.get("genres", []) if g.get("name")])
+            raw_tags.extend([t.get("name") for t in raw_payload_meta.get("themes", []) if t.get("name")])
+            raw_tags.extend([m.get("name") for m in raw_payload_meta.get("game_modes", []) if m.get("name")])
+            for mp in raw_payload_meta.get("multiplayer_modes", []):
+                if mp.get("campaigncoop"): raw_tags.append("Campaign Co-op")
+                if mp.get("lancoop"): raw_tags.append("LAN Co-op")
+                if mp.get("offlinecoop"): raw_tags.append("Offline Co-op")
+                if mp.get("onlinecoop"): raw_tags.append("Online Co-op")
+                if mp.get("dropin"): raw_tags.append("Drop-in/Drop-out")
+        
+        if raw_tags:
+            from providers import map_raw_tags
+            _, unmapped = map_raw_tags(raw_tags)
+            if unmapped:
+                st.write(f"**Other Tags (Unmapped):** {', '.join(sorted(set(unmapped)))}")
         
     st.write(f"**Description:** {description}")
     if item.get("cover_source_url"):
@@ -732,15 +756,16 @@ def configuration_page() -> None:
         order_map = {tid: i for i, tid in enumerate(st.session_state["tag_order"])}
         all_tags.sort(key=lambda t: order_map.get(t["id"], 999999))
         if all_tags:
-            h1, h2, h3, h4, h5 = st.columns([4, 4, 0.6, 0.8, 1.1])
+            h1, h2, h3, h4, h5, h6 = st.columns([3, 2.5, 0.6, 3, 0.6, 1.1])
             h1.markdown("**Name**")
             h2.markdown("**Category**")
             h3.markdown("**Color**")
-            h4.markdown("<div style='text-align: center; font-weight: bold;'>Principal</div>", unsafe_allow_html=True)
-            h5.markdown("<div style='text-align: center; font-weight: bold;'>Acción</div>", unsafe_allow_html=True)
+            h4.markdown("**Alias**")
+            h5.markdown("<div style='text-align: center; font-weight: bold;'>Principal</div>", unsafe_allow_html=True)
+            h6.markdown("<div style='text-align: center; font-weight: bold;'>Acción</div>", unsafe_allow_html=True)
             
             for tag in all_tags:
-                c1, c2, c3, c4, c5 = st.columns([4, 4, 0.6, 0.8, 1.1])
+                c1, c2, c3, c4, c5, c6 = st.columns([3, 2.5, 0.6, 3, 0.6, 1.1])
                 t_id = tag["id"]
                 new_name = c1.text_input("Name", value=tag["name"], key=f"t_name_{t_id}", label_visibility="collapsed")
                 
@@ -756,20 +781,22 @@ def configuration_page() -> None:
                 
                 new_color = c3.color_picker("Color", value=tag["color"], key=f"t_col_{t_id}", label_visibility="collapsed")
                 
-                with c4:
+                new_aliases = c4.text_input("Alias", value=tag.get("aliases", ""), key=f"t_aliases_{t_id}", label_visibility="collapsed")
+                
+                with c5:
                     _, c_chk, _ = st.columns([1, 1.5, 1])
                     new_main = c_chk.checkbox("Sí", value=bool(tag.get("is_main", 0)), key=f"t_main_{t_id}", label_visibility="collapsed")
                 
-                with c5:
+                with c6:
                     st.markdown('<div class="delete-btn-wrapper"></div>', unsafe_allow_html=True)
                     if st.button("Delete", key=f"del_{t_id}", type="secondary", use_container_width=True):
                         queue_dialog("delete_tag", t_id)
                 
-                changed = (new_name != tag["name"] or effective_cat != tag["category"] or new_color != tag["color"] or new_main != bool(tag.get("is_main", 0)))
+                changed = (new_name != tag["name"] or effective_cat != tag["category"] or new_color != tag["color"] or new_main != bool(tag.get("is_main", 0)) or new_aliases != tag.get("aliases", ""))
                 
                 if changed:
                     try:
-                        db.update_tag(t_id, new_name, effective_cat, new_color, new_main)
+                        db.update_tag(t_id, new_name, effective_cat, new_color, new_main, new_aliases)
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))

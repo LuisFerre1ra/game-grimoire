@@ -78,10 +78,16 @@ def init_database() -> None:
                 name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 category TEXT NOT NULL DEFAULT 'Other',
                 color TEXT NOT NULL DEFAULT '#7E8996',
-                parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
                 is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0, 1)),
                 is_main INTEGER NOT NULL DEFAULT 0 CHECK(is_main IN (0, 1)),
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tag_aliases (
+                id INTEGER PRIMARY KEY,
+                alias_name TEXT NOT NULL COLLATE NOCASE,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                UNIQUE(alias_name, tag_id)
             );
 
             CREATE TABLE IF NOT EXISTS games (
@@ -162,7 +168,7 @@ def init_database() -> None:
             """
         )
         try:
-            conn.execute("ALTER TABLE tags ADD COLUMN parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL")
+            conn.execute("ALTER TABLE tags DROP COLUMN parent_id")
         except sqlite3.OperationalError:
             pass
         try:
@@ -278,21 +284,25 @@ def get_game_tags(game_id: int) -> list[int]:
 
 def list_tags() -> list[dict[str, Any]]:
     with connection() as conn:
-        return [
-            dict(row)
-            for row in conn.execute("SELECT * FROM tags ORDER BY category, name").fetchall()
-        ]
+        rows = conn.execute("SELECT * FROM tags ORDER BY category, name").fetchall()
+        result = []
+        for row in rows:
+            tag_dict = dict(row)
+            alias_rows = conn.execute("SELECT alias_name FROM tag_aliases WHERE tag_id = ?", (row["id"],)).fetchall()
+            tag_dict["aliases"] = ", ".join(sorted([r["alias_name"] for r in alias_rows]))
+            result.append(tag_dict)
+        return result
 
 
-def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996", parent_id: int | None = None, is_custom: bool = False, is_main: bool = False) -> int:
+def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996", is_custom: bool = False, is_main: bool = False) -> int:
     clean_name = name.strip()
     with connection() as conn:
         row = conn.execute("SELECT id FROM tags WHERE name = ?", (clean_name,)).fetchone()
         if row:
             return row["id"]
         cursor = conn.execute(
-            "INSERT INTO tags(name, category, color, parent_id, is_custom, is_main, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (clean_name, category, color, parent_id, int(is_custom), int(is_main), now_iso())
+            "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (clean_name, category, color, int(is_custom), int(is_main), now_iso())
         )
         return cursor.lastrowid
 
@@ -308,7 +318,7 @@ def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main:
         )
 
 
-def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False) -> None:
+def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False, aliases: str = "") -> None:
     if not name.strip():
         raise ValueError("Tag requires a name.")
     with connection() as conn:
@@ -316,6 +326,10 @@ def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool 
             "UPDATE tags SET name = ?, category = ?, color = ?, is_main = ? WHERE id = ?",
             (name.strip(), category.strip() or "Other", color, int(is_main), tag_id),
         )
+        conn.execute("DELETE FROM tag_aliases WHERE tag_id = ?", (tag_id,))
+        alias_list = [a.strip().lower() for a in aliases.split(",") if a.strip()]
+        for alias in set(alias_list):
+            conn.execute("INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)", (alias, tag_id))
 
 
 def delete_tag(tag_id: int) -> None:
