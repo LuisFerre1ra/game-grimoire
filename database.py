@@ -155,6 +155,8 @@ def init_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
             CREATE INDEX IF NOT EXISTS idx_games_added_at ON games(added_at);
             CREATE INDEX IF NOT EXISTS idx_play_events_game ON play_events(game_id);
+            CREATE INDEX IF NOT EXISTS idx_tag_aliases_name ON tag_aliases(alias_name);
+            CREATE INDEX IF NOT EXISTS idx_game_tags_tag ON game_tags(tag_id);
 
             CREATE TABLE IF NOT EXISTS game_provider_data (
                 id INTEGER PRIMARY KEY,
@@ -197,38 +199,7 @@ def init_database() -> None:
             [(name, category, color, is_main, stamp) for name, category, color, is_main in DEFAULT_TAGS],
         )
 
-def migrate_phase1() -> None:
-    """Migrate existing RAWG data from games table to game_provider_data."""
-    init_database()
-    with connection() as conn:
-        games = conn.execute(
-            "SELECT id, metadata_source, rawg_id, external_metadata_json, metadata_updated_at "
-            "FROM games WHERE (rawg_id IS NOT NULL OR external_metadata_json IS NOT NULL) AND metadata_source IS NOT NULL"
-        ).fetchall()
-        for g in games:
-            provider = g["metadata_source"]
-            # Some old rows might have RAWG implicitly.
-            if not provider:
-                provider = "RAWG"
-            game_id = g["id"]
-            # For RAWG it was rawg_id, if it's IGDB it might be in the metadata if rawg_id is null
-            prov_id = str(g["rawg_id"]) if g["rawg_id"] else ""
-            if not prov_id and g["external_metadata_json"]:
-                try:
-                    prov_id = str(json.loads(g["external_metadata_json"]).get("id", ""))
-                except Exception:
-                    pass
-            
-            raw = g["external_metadata_json"]
-            fetched = g["metadata_updated_at"] or now_iso()
-            
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO game_provider_data(game_id, provider_name, provider_game_id, raw_payload_json, fetched_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (game_id, provider, prov_id, raw, fetched)
-            )
+
 
 
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
@@ -270,8 +241,25 @@ def list_games(statuses: Sequence[str] | None = None) -> list[dict[str, Any]]:
 
 
 def get_game(game_id: int) -> dict[str, Any] | None:
-    games = [game for game in list_games() if game["id"] == game_id]
-    return games[0] if games else None
+    query = """
+        SELECT
+            g.*,
+            estimate.hours AS hours,
+            estimate.source AS hours_source,
+            GROUP_CONCAT(DISTINCT t.name) AS tags_text,
+            GROUP_CONCAT(DISTINCT pe.played_year) AS years_text
+        FROM games g
+        LEFT JOIN playtime_estimates estimate
+            ON estimate.game_id = g.id AND estimate.selected = 1
+        LEFT JOIN game_tags gt ON gt.game_id = g.id
+        LEFT JOIN tags t ON t.id = gt.tag_id
+        LEFT JOIN play_events pe ON pe.game_id = g.id
+        WHERE g.id = ?
+        GROUP BY g.id
+    """
+    with connection() as conn:
+        row = conn.execute(query, (game_id,)).fetchone()
+    return _row_to_game(row) if row else None
 
 
 def get_game_tags(game_id: int) -> list[int]:
@@ -284,12 +272,20 @@ def get_game_tags(game_id: int) -> list[int]:
 
 def list_tags() -> list[dict[str, Any]]:
     with connection() as conn:
-        rows = conn.execute("SELECT * FROM tags ORDER BY category, name").fetchall()
+        rows = conn.execute(
+            """
+            SELECT t.*, GROUP_CONCAT(a.alias_name) AS aliases_text
+            FROM tags t
+            LEFT JOIN tag_aliases a ON a.tag_id = t.id
+            GROUP BY t.id
+            ORDER BY t.category, t.name
+            """
+        ).fetchall()
         result = []
         for row in rows:
             tag_dict = dict(row)
-            alias_rows = conn.execute("SELECT alias_name FROM tag_aliases WHERE tag_id = ?", (row["id"],)).fetchall()
-            tag_dict["aliases"] = ", ".join(sorted([r["alias_name"] for r in alias_rows]))
+            aliases_text = tag_dict.pop("aliases_text", None) or ""
+            tag_dict["aliases"] = ", ".join(sorted(set(a.strip() for a in aliases_text.split(",") if a.strip())))
             result.append(tag_dict)
         return result
 
@@ -497,10 +493,6 @@ def update_game_metadata(
     provider_name: str, 
     local_cover_path: str | None
 ) -> None:
-    multiplayer_parent_id = None
-    if unified.multiplayer_modes:
-        multiplayer_parent_id = get_or_create_tag("Multiplayer", category="Mode", color="#4389D7")
-        
     tag_ids = set()
     for g in unified.genres:
         tag_ids.add(get_or_create_tag(g, category="Género", color="#5C85A6"))
@@ -510,10 +502,11 @@ def update_game_metadata(
         if gm.lower() not in {"multiplayer", "multiplayedr"}:
             tag_ids.add(get_or_create_tag(gm, category="Mode", color="#4389D7"))
     for mm in unified.multiplayer_modes:
-        tag_ids.add(get_or_create_tag(mm, category="Mode", color="#4389D7", parent_id=multiplayer_parent_id))
+        tag_ids.add(get_or_create_tag(mm, category="Mode", color="#4389D7"))
     if unified.game_status:
         tag_ids.add(get_or_create_tag(unified.game_status, category="Status de Lanzamiento", color="#A8745A"))
 
+    stamp = now_iso()
     with connection() as conn:
         conn.execute(
             """
@@ -522,6 +515,8 @@ def update_game_metadata(
                 cover_local_path = COALESCE(?, cover_local_path),
                 cover_source_url = COALESCE(?, cover_source_url),
                 developer_info_json = ?,
+                metadata_source = ?,
+                metadata_updated_at = ?,
                 updated_at = ?
             WHERE id = ?
             """,
@@ -530,7 +525,9 @@ def update_game_metadata(
                 local_cover_path,
                 unified.cover_url,
                 json.dumps({"developers": unified.developers, "publishers": unified.publishers}, ensure_ascii=False),
-                now_iso(),
+                provider_name,
+                stamp,
+                stamp,
                 game_id,
             ),
         )
@@ -544,9 +541,14 @@ def update_game_metadata(
                 raw_payload_json = excluded.raw_payload_json,
                 fetched_at = excluded.fetched_at
             """,
-            (game_id, provider_name, unified.provider_id, raw_payload, now_iso())
+            (game_id, provider_name, unified.provider_id, raw_payload, stamp)
         )
         
+        # Remove old provider-assigned (non-custom) tags before adding new ones
+        conn.execute(
+            "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 0)",
+            (game_id,)
+        )
         for tid in tag_ids:
             conn.execute("INSERT OR IGNORE INTO game_tags(game_id, tag_id) VALUES (?, ?)", (game_id, tid))
         
@@ -557,14 +559,19 @@ def clear_game_metadata(game_id: int) -> None:
         conn.execute(
             """
             UPDATE games SET
-                rawg_id = NULL, rawg_slug = NULL, release_date = NULL,
+                release_date = NULL,
                 cover_local_path = NULL, cover_source_url = NULL,
-                developers_json = NULL, genres_json = NULL, rawg_tags_json = NULL,
-                metadata_source = NULL, metadata_updated_at = NULL, external_metadata_json = NULL,
+                developer_info_json = NULL,
+                metadata_source = NULL, metadata_updated_at = NULL,
                 updated_at = ?
             WHERE id = ?
             """,
             (now_iso(), game_id),
+        )
+        conn.execute("DELETE FROM game_provider_data WHERE game_id = ?", (game_id,))
+        conn.execute(
+            "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 0)",
+            (game_id,)
         )
         _history(conn, game_id, "metadata_cleared", {})
 
@@ -594,27 +601,52 @@ def set_setting(key: str, value: str) -> None:
 
 
 def dashboard_metrics() -> dict[str, Any]:
-    games = list_games()
-    backlog = [item for item in games if item["status"] == "backlog"]
-    known = [float(item["hours"]) for item in backlog if item["hours"] is not None]
-    missing = len(backlog) - len(known)
-    known_sum = sum(known)
+    with connection() as conn:
+        counts = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN status = 'backlog' THEN 1 ELSE 0 END) AS backlog,
+                SUM(CASE WHEN status = 'backlog' AND ready_to_play = 1 THEN 1 ELSE 0 END) AS ready,
+                SUM(CASE WHEN status = 'played' THEN 1 ELSE 0 END) AS played,
+                SUM(CASE WHEN status = 'abandoned' THEN 1 ELSE 0 END) AS abandoned
+            FROM games
+            """
+        ).fetchone()
+        hours_row = conn.execute(
+            """
+            SELECT
+                COUNT(e.hours) AS known_count,
+                COALESCE(SUM(e.hours), 0) AS known_sum
+            FROM games g
+            LEFT JOIN playtime_estimates e ON e.game_id = g.id AND e.selected = 1
+            WHERE g.status = 'backlog'
+            """
+        ).fetchone()
+    backlog_count = counts["backlog"] or 0
+    known_count = hours_row["known_count"] or 0
+    known_sum = hours_row["known_sum"] or 0
+    missing = backlog_count - known_count
     predicted_total: float | None = None
     margin: float | None = None
-    if missing and len(known) > 1:
-        mean = known_sum / len(known)
-        variance = sum((value - mean) ** 2 for value in known) / (len(known) - 1)
+    if missing and known_count > 1:
+        # For variance we still need the individual values
+        with connection() as conn:
+            values = [r[0] for r in conn.execute(
+                "SELECT e.hours FROM games g JOIN playtime_estimates e ON e.game_id = g.id AND e.selected = 1 WHERE g.status = 'backlog' AND e.hours IS NOT NULL"
+            ).fetchall()]
+        mean = known_sum / known_count
+        variance = sum((v - mean) ** 2 for v in values) / (known_count - 1)
         standard_deviation = variance**0.5
         predicted_total = known_sum + missing * mean
-        margin = 1.28 * standard_deviation * (missing + (missing**2 / len(known))) ** 0.5
+        margin = 1.28 * standard_deviation * (missing + (missing**2 / known_count)) ** 0.5
     elif not missing:
         predicted_total = known_sum
         margin = 0
     return {
-        "backlog": len(backlog),
-        "ready": sum(1 for item in backlog if item["ready_to_play"]),
-        "played": sum(1 for item in games if item["status"] == "played"),
-        "abandoned": sum(1 for item in games if item["status"] == "abandoned"),
+        "backlog": backlog_count,
+        "ready": counts["ready"] or 0,
+        "played": counts["played"] or 0,
+        "abandoned": counts["abandoned"] or 0,
         "known_hours": known_sum,
         "unknown_hours": missing,
         "predicted_hours": predicted_total,
