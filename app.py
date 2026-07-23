@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 import streamlit as st
+from st_keyup import st_keyup
 
 import database as db
 from providers import ProviderError, cache_cover, RAWGProvider, IGDBProvider
@@ -53,7 +54,13 @@ def inject_styles() -> None:
             transform: translateY(calc(-100% - 20px));
             z-index: 10;
           }
+          .special-tags-container .tag-chip {
+            box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.7);
+          }
           /* Custom Sidebar Navigation */
+          [data-testid="stSidebar"][aria-expanded="true"] {
+            width: 240px;
+          }
           [data-testid="stSidebar"] {
             background-color: #0b1423;
             border-right: 1px solid #1a2536;
@@ -64,7 +71,9 @@ def inject_styles() -> None:
             color: #8b9bb4;
             display: flex;
             justify-content: flex-start;
-            padding: 0.6rem 1rem;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.6rem 0.8rem;
             border-radius: 0.4rem;
             transition: all 0.2s ease;
             box-shadow: none;
@@ -72,7 +81,12 @@ def inject_styles() -> None:
           [data-testid="stSidebar"] [data-testid="stButton"] button:hover {
             background-color: #172439;
             color: #ffffff;
-            transform: translateX(4px);
+          }
+          [data-testid="stSidebar"] [data-testid="stButton"] button > * {
+            transition: transform 0.2s ease;
+          }
+          [data-testid="stSidebar"] [data-testid="stButton"] button:hover > * {
+            transform: scale(1.05);
           }
           [data-testid="stSidebar"] [data-testid="stButton"] button[kind="primary"] {
             background-color: #1e3152;
@@ -431,7 +445,8 @@ def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any
     tags = db.list_tags()
     with st.container(border=True):
         row1_col1, row1_col2, row1_col3 = st.columns([2, 1, 1], vertical_alignment="bottom")
-        query = row1_col1.text_input("Search by title", key=f"{key}_search")
+        with row1_col1:
+            query = st_keyup("Search by title", key=f"{key}_search")
         wanted_tags = row1_col2.multiselect("Tags (incluir)", [tag["name"] for tag in tags], key=f"{key}_tags")
         excluded_tags = row1_col3.multiselect("Tags (excluir)", [tag["name"] for tag in tags], key=f"{key}_tags_exc")
         
@@ -456,7 +471,7 @@ def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any
         if duration_category == "Largos (+30h)" and h >= 30: return True
         return False
 
-    text = query.strip().casefold()
+    text = (query or "").strip().casefold()
     filtered = [
         item for item in items
         if (not text or text in item["title"].casefold())
@@ -816,15 +831,23 @@ def configuration_page() -> None:
 
 def main() -> None:
     inject_styles()
-    pages = ["Backlog", "Played", "Add Games", "Settings"]
+    nav_items = [
+        {"name": "Backlog", "icon": ":material/inventory_2:"},
+        {"name": "Played", "icon": ":material/sports_esports:"},
+        {"name": "Add Games", "icon": ":material/add_circle:"},
+        {"name": "Settings", "icon": ":material/settings:"},
+    ]
     if "page" not in st.session_state:
         st.session_state["page"] = "Backlog"
         
     page = st.session_state["page"]
+    current_year = datetime.now().year
     with st.sidebar:
         st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Library</h2>", unsafe_allow_html=True)
-        for p in pages:
-            if st.button(p, key=f"nav_{p}", use_container_width=True, type="primary" if page == p else "secondary"):
+        for item in nav_items:
+            p = item["name"]
+            icon = item["icon"]
+            if st.button(p, icon=icon, key=f"nav_{p}", use_container_width=True, type="primary" if page == p else "secondary"):
                 if p != "Settings" and "tag_order" in st.session_state:
                     del st.session_state["tag_order"]
                 st.session_state["page"] = p
