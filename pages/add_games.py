@@ -42,7 +42,7 @@ def enrich_one(game_id: int, title: str) -> str:
                     pass
                 db.update_game_metadata(game_id, unified, json.dumps(raw, ensure_ascii=False), provider.get_name(), local_cover)
                 return f"Updated from {provider.get_name()}."
-        except ProviderError as exc:
+        except Exception as exc:
             last_error = f"{provider.get_name()} error: {exc}"
             continue
     return last_error or "No se encontraron coincidencias en ningún proveedor."
@@ -88,6 +88,8 @@ def add_games_page() -> None:
             messages.append(f"{title}: {enrich_one(game_id, title)}")
             progress.progress(number / len(created), text=f"Enriqueciendo {number} de {len(created)}…")
         progress.empty()
+        cached_list_tags.clear()
+
     st.success(f"Added {len(created)} game(s).")
     if skipped:
         st.info(f"Skipped duplicates: {', '.join(skipped)}")

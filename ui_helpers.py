@@ -11,6 +11,9 @@ def cached_list_tags() -> list[dict[str, Any]]:
     """Cached wrapper to avoid re-querying tags on every render."""
     return db.list_tags()
 
+def clear_tags_cache() -> None:
+    cached_list_tags.clear()
+
 def inject_styles() -> None:
     st.markdown(
         """

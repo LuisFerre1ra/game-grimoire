@@ -201,9 +201,12 @@ def metadata_dialog(game_id: int) -> None:
     st.write(f"**Description:** {description}")
     if item.get("cover_source_url"):
         st.link_button("Abrir imagen de origen", item["cover_source_url"])
-    if provider_data:
+    if provider_data and provider_data.get("raw_payload_json"):
         with st.expander("Internal Archive"):
-            st.json(json.loads(provider_data["raw_payload_json"]))
+            try:
+                st.json(json.loads(provider_data["raw_payload_json"]))
+            except (json.JSONDecodeError, TypeError):
+                st.code(provider_data["raw_payload_json"], language="json")
 
 @st.dialog("Completar información", on_dismiss=dismiss_dialog)
 def enrich_game_dialog(game_id: int) -> None:

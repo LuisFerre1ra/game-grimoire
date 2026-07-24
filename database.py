@@ -105,7 +105,7 @@ def init_database() -> None:
 
             CREATE TABLE IF NOT EXISTS game_tags (
                 game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE RESTRICT,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
                 PRIMARY KEY(game_id, tag_id)
             );
 
@@ -164,23 +164,6 @@ def init_database() -> None:
             );
             """
         )
-        try:
-            conn.execute("ALTER TABLE tags DROP COLUMN parent_id")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE tags ADD COLUMN is_custom INTEGER NOT NULL DEFAULT 0 CHECK(is_custom IN (0, 1))")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE tags ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0 CHECK(is_main IN (0, 1))")
-            conn.execute("UPDATE tags SET is_main = 1 WHERE name IN ('Early Access', 'Unreleased', 'Incomplete content', 'Unplayable')")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE games ADD COLUMN developer_info_json TEXT")
-        except sqlite3.OperationalError:
-            pass
         stamp = now_iso()
         conn.executemany(
             """
@@ -212,16 +195,21 @@ def list_games(statuses: Sequence[str] | None = None) -> list[dict[str, Any]]:
             g.*,
             estimate.hours AS hours,
             estimate.source AS hours_source,
-            GROUP_CONCAT(DISTINCT t.name) AS tags_text,
-            GROUP_CONCAT(DISTINCT pe.played_year) AS years_text
+            (
+                SELECT GROUP_CONCAT(t.name)
+                FROM game_tags gt
+                JOIN tags t ON t.id = gt.tag_id
+                WHERE gt.game_id = g.id
+            ) AS tags_text,
+            (
+                SELECT GROUP_CONCAT(DISTINCT pe.played_year)
+                FROM play_events pe
+                WHERE pe.game_id = g.id AND pe.played_year IS NOT NULL
+            ) AS years_text
         FROM games g
         LEFT JOIN playtime_estimates estimate
             ON estimate.game_id = g.id AND estimate.selected = 1
-        LEFT JOIN game_tags gt ON gt.game_id = g.id
-        LEFT JOIN tags t ON t.id = gt.tag_id
-        LEFT JOIN play_events pe ON pe.game_id = g.id
         {where}
-        GROUP BY g.id
     """
     with connection() as conn:
         return [_row_to_game(row) for row in conn.execute(query, parameters).fetchall()]
@@ -232,16 +220,21 @@ def get_game(game_id: int) -> dict[str, Any] | None:
             g.*,
             estimate.hours AS hours,
             estimate.source AS hours_source,
-            GROUP_CONCAT(DISTINCT t.name) AS tags_text,
-            GROUP_CONCAT(DISTINCT pe.played_year) AS years_text
+            (
+                SELECT GROUP_CONCAT(t.name)
+                FROM game_tags gt
+                JOIN tags t ON t.id = gt.tag_id
+                WHERE gt.game_id = g.id
+            ) AS tags_text,
+            (
+                SELECT GROUP_CONCAT(DISTINCT pe.played_year)
+                FROM play_events pe
+                WHERE pe.game_id = g.id AND pe.played_year IS NOT NULL
+            ) AS years_text
         FROM games g
         LEFT JOIN playtime_estimates estimate
             ON estimate.game_id = g.id AND estimate.selected = 1
-        LEFT JOIN game_tags gt ON gt.game_id = g.id
-        LEFT JOIN tags t ON t.id = gt.tag_id
-        LEFT JOIN play_events pe ON pe.game_id = g.id
         WHERE g.id = ?
-        GROUP BY g.id
     """
     with connection() as conn:
         row = conn.execute(query, (game_id,)).fetchone()
@@ -286,10 +279,17 @@ def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996"
         )
         return cursor.lastrowid
 
-def resolve_tags_via_aliases(raw_names: list[str]) -> set[int]:
-    """Look up raw provider tag names via the alias table.
+def _clear_tags_cache_safe() -> None:
+    try:
+        from ui_helpers import clear_tags_cache
+        clear_tags_cache()
+    except Exception:
+        pass
 
-    Returns the set of tag IDs that matched.  Unknown names are silently
+def resolve_tags_via_aliases(raw_names: list[str]) -> set[int]:
+    """Look up raw provider tag names via tags table or tag_aliases table.
+
+    Returns the set of tag IDs that matched. Unknown names are silently
     skipped — no new tags are ever created by this function.
     """
     cleaned = [n.strip().lower() for n in raw_names if n and n.strip()]
@@ -297,11 +297,17 @@ def resolve_tags_via_aliases(raw_names: list[str]) -> set[int]:
         return set()
     placeholders = ",".join(["?"] * len(cleaned))
     with connection() as conn:
-        rows = conn.execute(
-            f"SELECT DISTINCT a.tag_id FROM tag_aliases a WHERE a.alias_name IN ({placeholders})",
+        rows_alias = conn.execute(
+            f"SELECT DISTINCT a.tag_id FROM tag_aliases a WHERE LOWER(a.alias_name) IN ({placeholders})",
             cleaned,
         ).fetchall()
-    return {r["tag_id"] for r in rows}
+        rows_direct = conn.execute(
+            f"SELECT DISTINCT t.id AS tag_id FROM tags t WHERE LOWER(t.name) IN ({placeholders})",
+            cleaned,
+        ).fetchall()
+    matched = {r["tag_id"] for r in rows_alias}
+    matched.update(r["tag_id"] for r in rows_direct)
+    return matched
 
 def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main: bool = False) -> None:
     clean_name = name.strip()
@@ -312,6 +318,7 @@ def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main:
             "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, 1, ?, ?)",
             (clean_name, category.strip() or "Other", color, int(is_main), now_iso()),
         )
+    _clear_tags_cache_safe()
 
 def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False, aliases: str = "") -> None:
     if not name.strip():
@@ -325,11 +332,13 @@ def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool 
         alias_list = [a.strip().lower() for a in aliases.split(",") if a.strip()]
         for alias in set(alias_list):
             conn.execute("INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)", (alias, tag_id))
+    _clear_tags_cache_safe()
 
 def delete_tag(tag_id: int) -> None:
     with connection() as conn:
         conn.execute("DELETE FROM game_tags WHERE tag_id = ?", (tag_id,))
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+    _clear_tags_cache_safe()
 
 def create_game(
     title: str,
@@ -544,6 +553,7 @@ def update_game_metadata(
             conn.execute("INSERT OR IGNORE INTO game_tags(game_id, tag_id) VALUES (?, ?)", (game_id, tid))
         
         _history(conn, game_id, "metadata_updated", {"source": provider_name})
+    _clear_tags_cache_safe()
 
 def clear_game_metadata(game_id: int) -> None:
     with connection() as conn:
@@ -565,6 +575,7 @@ def clear_game_metadata(game_id: int) -> None:
             (game_id,)
         )
         _history(conn, game_id, "metadata_cleared", {})
+    _clear_tags_cache_safe()
 
 def _history(conn: sqlite3.Connection, game_id: int, event_type: str, details: dict[str, Any]) -> None:
     conn.execute(
