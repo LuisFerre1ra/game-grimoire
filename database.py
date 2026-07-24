@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from interfaces import UnifiedGameData
+from interfaces import GameStatus, UnifiedGameData
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -23,6 +23,8 @@ DEFAULT_TAGS = [
     ("Unreleased", "Status", "#8C8C8C", 1),
     ("Incomplete Content", "Status", "#A8745A", 1),
 ]
+
+_VALID_STATUSES = frozenset(s.value for s in GameStatus)
 
 def now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -93,6 +95,7 @@ def init_database() -> None:
                     CHECK(status IN ('backlog', 'played', 'abandoned')),
                 ready_to_play INTEGER NOT NULL DEFAULT 0 CHECK(ready_to_play IN (0, 1)),
                 notes TEXT,
+                hours REAL CHECK(hours IS NULL OR hours > 0),
                 added_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 release_date TEXT,
@@ -109,26 +112,6 @@ def init_database() -> None:
                 PRIMARY KEY(game_id, tag_id)
             );
 
-            CREATE TABLE IF NOT EXISTS playtime_estimates (
-                id INTEGER PRIMARY KEY,
-                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-                source TEXT NOT NULL,
-                metric TEXT NOT NULL DEFAULT 'historia_principal',
-                hours REAL CHECK(hours IS NULL OR hours > 0),
-                result_status TEXT NOT NULL DEFAULT 'found'
-                    CHECK(result_status IN ('found', 'not_found', 'error', 'needs_review')),
-                query_title TEXT,
-                matched_title TEXT,
-                confidence REAL,
-                source_url TEXT,
-                raw_payload_json TEXT,
-                selected INTEGER NOT NULL DEFAULT 0 CHECK(selected IN (0, 1)),
-                retrieved_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS one_selected_estimate_per_game
-                ON playtime_estimates(game_id) WHERE selected = 1;
-
             CREATE TABLE IF NOT EXISTS play_events (
                 id INTEGER PRIMARY KEY,
                 game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
@@ -136,14 +119,6 @@ def init_database() -> None:
                 played_year INTEGER CHECK(played_year BETWEEN 1900 AND 2200),
                 played_at TEXT,
                 notes TEXT,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS game_history (
-                id INTEGER PRIMARY KEY,
-                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-                event_type TEXT NOT NULL,
-                details_json TEXT,
                 created_at TEXT NOT NULL
             );
 
@@ -164,6 +139,19 @@ def init_database() -> None:
             );
             """
         )
+
+        try:
+            conn.execute("""
+                UPDATE games SET hours = (
+                    SELECT hours FROM playtime_estimates
+                    WHERE playtime_estimates.game_id = games.id AND playtime_estimates.selected = 1
+                    LIMIT 1
+                ) WHERE hours IS NULL AND EXISTS (
+                    SELECT 1 FROM playtime_estimates WHERE playtime_estimates.game_id = games.id AND selected = 1
+                )
+            """)
+        except sqlite3.OperationalError:
+            pass
         stamp = now_iso()
         conn.executemany(
             """
@@ -172,6 +160,8 @@ def init_database() -> None:
             """,
             [(name, category, color, is_main, stamp) for name, category, color, is_main in DEFAULT_TAGS],
         )
+
+    # Fix game_tags FK constraint if the DB was created with RESTRICT
 
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
@@ -182,6 +172,23 @@ def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item["years"] = [int(value) for value in years_text.split(",") if value]
     return item
 
+_GAMES_QUERY = """
+    SELECT
+        g.*,
+        (
+            SELECT GROUP_CONCAT(t.name)
+            FROM game_tags gt
+            JOIN tags t ON t.id = gt.tag_id
+            WHERE gt.game_id = g.id
+        ) AS tags_text,
+        (
+            SELECT GROUP_CONCAT(DISTINCT pe.played_year)
+            FROM play_events pe
+            WHERE pe.game_id = g.id AND pe.played_year IS NOT NULL
+        ) AS years_text
+    FROM games g
+"""
+
 def list_games(statuses: Sequence[str] | None = None) -> list[dict[str, Any]]:
     clauses: list[str] = []
     parameters: list[Any] = []
@@ -190,55 +197,23 @@ def list_games(statuses: Sequence[str] | None = None) -> list[dict[str, Any]]:
         clauses.append(f"g.status IN ({placeholders})")
         parameters.extend(statuses)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    query = f"""
-        SELECT
-            g.*,
-            estimate.hours AS hours,
-            estimate.source AS hours_source,
-            (
-                SELECT GROUP_CONCAT(t.name)
-                FROM game_tags gt
-                JOIN tags t ON t.id = gt.tag_id
-                WHERE gt.game_id = g.id
-            ) AS tags_text,
-            (
-                SELECT GROUP_CONCAT(DISTINCT pe.played_year)
-                FROM play_events pe
-                WHERE pe.game_id = g.id AND pe.played_year IS NOT NULL
-            ) AS years_text
-        FROM games g
-        LEFT JOIN playtime_estimates estimate
-            ON estimate.game_id = g.id AND estimate.selected = 1
-        {where}
-    """
+    query = f"{_GAMES_QUERY} {where}"
     with connection() as conn:
         return [_row_to_game(row) for row in conn.execute(query, parameters).fetchall()]
 
 def get_game(game_id: int) -> dict[str, Any] | None:
-    query = """
-        SELECT
-            g.*,
-            estimate.hours AS hours,
-            estimate.source AS hours_source,
-            (
-                SELECT GROUP_CONCAT(t.name)
-                FROM game_tags gt
-                JOIN tags t ON t.id = gt.tag_id
-                WHERE gt.game_id = g.id
-            ) AS tags_text,
-            (
-                SELECT GROUP_CONCAT(DISTINCT pe.played_year)
-                FROM play_events pe
-                WHERE pe.game_id = g.id AND pe.played_year IS NOT NULL
-            ) AS years_text
-        FROM games g
-        LEFT JOIN playtime_estimates estimate
-            ON estimate.game_id = g.id AND estimate.selected = 1
-        WHERE g.id = ?
-    """
+    query = f"{_GAMES_QUERY} WHERE g.id = ?"
     with connection() as conn:
         row = conn.execute(query, (game_id,)).fetchone()
     return _row_to_game(row) if row else None
+
+def get_all_normalized_titles() -> set[str]:
+    """Get normalized titles for duplicate checks."""
+    with connection() as conn:
+        rows = conn.execute("SELECT normalized_title FROM games").fetchall()
+    return {row[0] for row in rows}
+
+# Tags
 
 def get_game_tags(game_id: int) -> list[int]:
     with connection() as conn:
@@ -279,13 +254,6 @@ def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996"
         )
         return cursor.lastrowid
 
-def _clear_tags_cache_safe() -> None:
-    try:
-        from ui_helpers import clear_tags_cache
-        clear_tags_cache()
-    except Exception:
-        pass
-
 def resolve_tags_via_aliases(raw_names: list[str]) -> set[int]:
     """Look up raw provider tag names via tags table or tag_aliases table.
 
@@ -309,55 +277,81 @@ def resolve_tags_via_aliases(raw_names: list[str]) -> set[int]:
     matched.update(r["tag_id"] for r in rows_direct)
     return matched
 
+def lookup_aliases_by_names(raw_names: list[str]) -> list[dict[str, str]]:
+    """Return alias_name → (tag_name, category) mappings for a list of raw names.
+
+    Each result dict has keys: alias_name, name, category.
+    """
+    if not raw_names:
+        return []
+    lower_tags = [r.lower() for r in raw_names]
+    placeholders = ",".join(["?"] * len(lower_tags))
+    with connection() as conn:
+        rows = conn.execute(
+            f"SELECT a.alias_name, t.name, t.category "
+            f"FROM tag_aliases a JOIN tags t ON a.tag_id = t.id "
+            f"WHERE a.alias_name IN ({placeholders})",
+            lower_tags,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main: bool = False) -> None:
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Tag requires a name.")
-    with connection() as conn:
-        conn.execute(
-            "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, 1, ?, ?)",
-            (clean_name, category.strip() or "Other", color, int(is_main), now_iso()),
-        )
-    _clear_tags_cache_safe()
+    try:
+        with connection() as conn:
+            conn.execute(
+                "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, 1, ?, ?)",
+                (clean_name, category.strip() or "Other", color, int(is_main), now_iso()),
+            )
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A tag with the name already exists «{clean_name}».")
 
 def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False, aliases: str = "") -> None:
     if not name.strip():
         raise ValueError("Tag requires a name.")
-    with connection() as conn:
-        conn.execute(
-            "UPDATE tags SET name = ?, category = ?, color = ?, is_main = ? WHERE id = ?",
-            (name.strip(), category.strip() or "Other", color, int(is_main), tag_id),
-        )
-        conn.execute("DELETE FROM tag_aliases WHERE tag_id = ?", (tag_id,))
-        alias_list = [a.strip().lower() for a in aliases.split(",") if a.strip()]
-        for alias in set(alias_list):
-            conn.execute("INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)", (alias, tag_id))
-    _clear_tags_cache_safe()
+    try:
+        with connection() as conn:
+            conn.execute(
+                "UPDATE tags SET name = ?, category = ?, color = ?, is_main = ? WHERE id = ?",
+                (name.strip(), category.strip() or "Other", color, int(is_main), tag_id),
+            )
+            conn.execute("DELETE FROM tag_aliases WHERE tag_id = ?", (tag_id,))
+            alias_list = [a.strip().lower() for a in aliases.split(",") if a.strip()]
+            for alias in set(alias_list):
+                conn.execute("INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)", (alias, tag_id))
+    except sqlite3.IntegrityError:
+        raise ValueError(f"A tag with the name already exists «{name.strip()}».")
 
 def delete_tag(tag_id: int) -> None:
     with connection() as conn:
         conn.execute("DELETE FROM game_tags WHERE tag_id = ?", (tag_id,))
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
-    _clear_tags_cache_safe()
+
+# Games CRUD
 
 def create_game(
     title: str,
-    status: str = "backlog",
+    status: str = GameStatus.BACKLOG,
     ready_to_play: bool = False,
     notes: str | None = None,
     tag_ids: Sequence[int] = (),
+    hours: float | None = None,
 ) -> int:
     clean_title = title.strip()
     if not clean_title:
         raise ValueError("El título no puede estar vacío.")
-    if status not in {"backlog", "played", "abandoned"}:
+    if status not in _VALID_STATUSES:
         raise ValueError("Status no válido.")
+    if hours is not None and hours <= 0:
+        raise ValueError("Hours must be greater than zero.")
     stamp = now_iso()
     with connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO games(title, normalized_title, status, ready_to_play, notes, added_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO games(title, normalized_title, status, ready_to_play, notes, hours, added_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 clean_title,
@@ -365,13 +359,13 @@ def create_game(
                 status,
                 int(ready_to_play),
                 notes.strip() if notes else None,
+                hours,
                 stamp,
                 stamp,
             ),
         )
         game_id = int(cursor.lastrowid)
         _set_game_tags(conn, game_id, tag_ids)
-        _history(conn, game_id, "created", {"status": status})
     return game_id
 
 def _set_game_tags(conn: sqlite3.Connection, game_id: int, tag_ids: Sequence[int]) -> None:
@@ -391,15 +385,18 @@ def update_game(
     ready_to_play: bool,
     notes: str | None,
     tag_ids: Sequence[int],
+    hours: float | None = None,
 ) -> None:
     clean_title = title.strip()
     if not clean_title:
         raise ValueError("El título no puede estar vacío.")
+    if hours is not None and hours <= 0:
+        raise ValueError("Hours must be greater than zero.")
     with connection() as conn:
         conn.execute(
             """
             UPDATE games
-            SET title = ?, normalized_title = ?, ready_to_play = ?, notes = ?, updated_at = ?
+            SET title = ?, normalized_title = ?, ready_to_play = ?, notes = ?, hours = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -407,65 +404,57 @@ def update_game(
                 normalize_title(clean_title),
                 int(ready_to_play),
                 notes.strip() if notes else None,
+                hours,
                 now_iso(),
                 game_id,
             ),
         )
         _set_game_tags(conn, game_id, tag_ids)
-        _history(conn, game_id, "edited", {"title": clean_title})
 
-def add_or_select_estimate(
-    game_id: int,
-    hours: float | None,
-    source: str = "Manual",
-    metric: str = "historia_principal",
-    result_status: str = "found",
-    matched_title: str | None = None,
-    confidence: float | None = None,
-    source_url: str | None = None,
-) -> None:
+def set_game_hours(game_id: int, hours: float | None) -> None:
+    """Set (or clear) the playtime hours for a game."""
     if hours is not None and hours <= 0:
         raise ValueError("Hours must be greater than zero.")
     with connection() as conn:
-        conn.execute("UPDATE playtime_estimates SET selected = 0 WHERE game_id = ?", (game_id,))
+        conn.execute("UPDATE games SET hours = ?, updated_at = ? WHERE id = ?", (hours, now_iso(), game_id))
+
+def clear_selected_estimate(game_id: int) -> None:
+    with connection() as conn:
+        conn.execute("UPDATE games SET hours = NULL, updated_at = ? WHERE id = ?", (now_iso(), game_id))
+
+def add_play_event(
+    game_id: int,
+    outcome: str,
+    played_year: int | None = None,
+    notes: str | None = None,
+) -> None:
+    """Log play session without changing status."""
+    with connection() as conn:
         conn.execute(
             """
-            INSERT INTO playtime_estimates(
-                game_id, source, metric, hours, result_status, matched_title,
-                confidence, source_url, selected, retrieved_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            INSERT INTO play_events(game_id, outcome, played_year, notes, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 game_id,
-                source,
-                metric,
-                hours,
-                result_status,
-                matched_title,
-                confidence,
-                source_url,
+                outcome,
+                played_year,
+                notes.strip() if notes else None,
                 now_iso(),
             ),
         )
-        _history(conn, game_id, "playtime_updated", {"hours": hours, "source": source})
-
-def clear_selected_estimate(game_id: int) -> None:
-    """Keep prior estimates as history but leave the game without an active duration."""
-    with connection() as conn:
-        conn.execute("UPDATE playtime_estimates SET selected = 0 WHERE game_id = ?", (game_id,))
-        _history(conn, game_id, "playtime_cleared", {})
 
 def change_status(
     game_id: int, status: str, played_year: int | None = None, notes: str | None = None
 ) -> None:
-    if status not in {"backlog", "played", "abandoned"}:
+    if status not in _VALID_STATUSES:
         raise ValueError("Status no válido.")
     with connection() as conn:
         conn.execute(
             "UPDATE games SET status = ?, updated_at = ? WHERE id = ?",
             (status, now_iso(), game_id),
         )
-        if status in {"played", "abandoned"}:
+        if status in {GameStatus.PLAYED, GameStatus.ABANDONED}:
             conn.execute(
                 """
                 INSERT INTO play_events(game_id, outcome, played_year, notes, created_at)
@@ -473,13 +462,12 @@ def change_status(
                 """,
                 (
                     game_id,
-                    "completed" if status == "played" else "abandoned",
+                    "completed" if status == GameStatus.PLAYED else "abandoned",
                     played_year,
                     notes.strip() if notes else None,
                     now_iso(),
                 ),
             )
-        _history(conn, game_id, "status_changed", {"status": status, "year": played_year})
 
 def delete_game(game_id: int) -> None:
     with connection() as conn:
@@ -514,6 +502,7 @@ def update_game_metadata(
                 release_date = COALESCE(?, release_date),
                 cover_local_path = COALESCE(?, cover_local_path),
                 cover_source_url = COALESCE(?, cover_source_url),
+                hours = COALESCE(?, hours),
                 developer_info_json = ?,
                 metadata_source = ?,
                 metadata_updated_at = ?,
@@ -524,6 +513,7 @@ def update_game_metadata(
                 unified.first_release_date,
                 local_cover_path,
                 unified.cover_url,
+                unified.playtime_hours,
                 json.dumps({"developers": unified.developers, "publishers": unified.publishers}, ensure_ascii=False),
                 provider_name,
                 stamp,
@@ -551,9 +541,6 @@ def update_game_metadata(
         )
         for tid in tag_ids:
             conn.execute("INSERT OR IGNORE INTO game_tags(game_id, tag_id) VALUES (?, ?)", (game_id, tid))
-        
-        _history(conn, game_id, "metadata_updated", {"source": provider_name})
-    _clear_tags_cache_safe()
 
 def clear_game_metadata(game_id: int) -> None:
     with connection() as conn:
@@ -574,14 +561,42 @@ def clear_game_metadata(game_id: int) -> None:
             "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 0)",
             (game_id,)
         )
-        _history(conn, game_id, "metadata_cleared", {})
-    _clear_tags_cache_safe()
 
-def _history(conn: sqlite3.Connection, game_id: int, event_type: str, details: dict[str, Any]) -> None:
-    conn.execute(
-        "INSERT INTO game_history(game_id, event_type, details_json, created_at) VALUES (?, ?, ?, ?)",
-        (game_id, event_type, json.dumps(details, ensure_ascii=False), now_iso()),
-    )
+# Provider queries
+
+def get_game_provider_data(game_id: int) -> dict[str, Any] | None:
+    """Return the most recent provider data row for a game, or None."""
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT provider_name, raw_payload_json FROM game_provider_data "
+            "WHERE game_id = ? ORDER BY fetched_at DESC LIMIT 1",
+            (game_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+def get_game_tags_with_categories(game_id: int) -> list[dict[str, str]]:
+    """Return [{name, category}, ...] for a game's tags, ordered by category/name."""
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT t.name, t.category FROM tags t "
+            "JOIN game_tags gt ON t.id = gt.tag_id "
+            "WHERE gt.game_id = ? ORDER BY t.category, t.name",
+            (game_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+def get_games_missing_provider_data() -> list[dict[str, Any]]:
+    """Return games that have no entry in game_provider_data (single query)."""
+    query = f"""
+        {_GAMES_QUERY}
+        WHERE NOT EXISTS (
+            SELECT 1 FROM game_provider_data gpd WHERE gpd.game_id = g.id
+        )
+    """
+    with connection() as conn:
+        return [_row_to_game(row) for row in conn.execute(query).fetchall()]
+
+# Settings
 
 def get_setting(key: str, default: str = "") -> str:
     with connection() as conn:
@@ -598,6 +613,29 @@ def set_setting(key: str, value: str) -> None:
             (key, value, now_iso()),
         )
 
+# Hours calculation helper
+
+def estimate_total_hours(
+    known_hours: list[float], unknown_count: int
+) -> tuple[float | None, float | None]:
+    """Predict total hours using sample mean extrapolation.
+
+    Returns (predicted_total, margin) at 80% confidence,
+    or (None, None) if there isn't enough data.
+    """
+    if not unknown_count:
+        return sum(known_hours) if known_hours else 0.0, 0.0
+    if len(known_hours) <= 1:
+        return None, None
+    known_sum = sum(known_hours)
+    known_count = len(known_hours)
+    mean = known_sum / known_count
+    variance = sum((v - mean) ** 2 for v in known_hours) / (known_count - 1)
+    std_dev = variance ** 0.5
+    predicted = known_sum + unknown_count * mean
+    margin = 1.28 * std_dev * (unknown_count + (unknown_count ** 2 / known_count)) ** 0.5
+    return predicted, margin
+
 def dashboard_metrics() -> dict[str, Any]:
     with connection() as conn:
         counts = conn.execute(
@@ -610,36 +648,16 @@ def dashboard_metrics() -> dict[str, Any]:
             FROM games
             """
         ).fetchone()
-        hours_row = conn.execute(
-            """
-            SELECT
-                COUNT(e.hours) AS known_count,
-                COALESCE(SUM(e.hours), 0) AS known_sum
-            FROM games g
-            LEFT JOIN playtime_estimates e ON e.game_id = g.id AND e.selected = 1
-            WHERE g.status = 'backlog'
-            """
-        ).fetchone()
+        hours_rows = conn.execute(
+            "SELECT hours FROM games WHERE status = 'backlog' AND hours IS NOT NULL"
+        ).fetchall()
+
     backlog_count = counts["backlog"] or 0
-    known_count = hours_row["known_count"] or 0
-    known_sum = hours_row["known_sum"] or 0
-    missing = backlog_count - known_count
-    predicted_total: float | None = None
-    margin: float | None = None
-    if missing and known_count > 1:
-        # For variance we still need the individual values
-        with connection() as conn:
-            values = [r[0] for r in conn.execute(
-                "SELECT e.hours FROM games g JOIN playtime_estimates e ON e.game_id = g.id AND e.selected = 1 WHERE g.status = 'backlog' AND e.hours IS NOT NULL"
-            ).fetchall()]
-        mean = known_sum / known_count
-        variance = sum((v - mean) ** 2 for v in values) / (known_count - 1)
-        standard_deviation = variance**0.5
-        predicted_total = known_sum + missing * mean
-        margin = 1.28 * standard_deviation * (missing + (missing**2 / known_count)) ** 0.5
-    elif not missing:
-        predicted_total = known_sum
-        margin = 0
+    known_hours = [r[0] for r in hours_rows]
+    known_sum = sum(known_hours) if known_hours else 0
+    missing = backlog_count - len(known_hours)
+    predicted_total, margin = estimate_total_hours(known_hours, missing)
+
     return {
         "backlog": backlog_count,
         "ready": counts["ready"] or 0,

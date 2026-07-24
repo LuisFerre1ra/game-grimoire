@@ -1,5 +1,13 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Protocol, Any
+
+class GameStatus(str, Enum):
+    """Canonical game statuses. Inherits from str so values work
+    directly in SQL parameters and dict comparisons."""
+    BACKLOG = "backlog"
+    PLAYED = "played"
+    ABANDONED = "abandoned"
 
 @dataclass
 class UnifiedGameData:

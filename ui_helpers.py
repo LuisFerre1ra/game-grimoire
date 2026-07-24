@@ -1,4 +1,5 @@
 from __future__ import annotations
+import html as html_mod
 from datetime import datetime
 from typing import Any, Iterable
 import streamlit as st
@@ -137,14 +138,16 @@ def tag_html(tags: Iterable[str], limit: int = 4, show_empty: bool = True) -> st
     
     chips = []
     for name in shown:
-        color = name_to_color.get(name, "#27374d")
-        chips.append(f'<span class="tag-chip" style="background-color: {color}; white-space: nowrap; text-overflow: ellipsis; max-width: 150px; overflow: hidden;">{name}</span>')
+        safe_name = html_mod.escape(name)
+        safe_color = html_mod.escape(name_to_color.get(name, "#27374d"))
+        chips.append(f'<span class="tag-chip" style="background-color: {safe_color}; white-space: nowrap; text-overflow: ellipsis; max-width: 150px; overflow: hidden;">{safe_name}</span>')
         
     if hidden:
         hidden_chips = []
         for name in hidden:
-            h_color = name_to_color.get(name, "#27374d")
-            hidden_chips.append(f'<span class="tag-chip" style="background-color: {h_color}; margin-bottom: 0.2rem;">{name}</span>')
+            safe_name = html_mod.escape(name)
+            safe_color = html_mod.escape(name_to_color.get(name, "#27374d"))
+            hidden_chips.append(f'<span class="tag-chip" style="background-color: {safe_color}; margin-bottom: 0.2rem;">{safe_name}</span>')
             
         hidden_html = "".join(hidden_chips)
         
