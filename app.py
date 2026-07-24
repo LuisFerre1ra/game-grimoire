@@ -35,10 +35,9 @@ def main() -> None:
             p = item["name"]
             icon = item["icon"]
             if st.button(p, icon=icon, key=f"nav_{p}", use_container_width=True, type="primary" if page == p else "secondary"):
-                if p != "Settings" and "tag_order" in st.session_state:
-                    del st.session_state["tag_order"]
                 st.session_state["page"] = p
                 st.rerun()
+
     if page == "Backlog": inventory_page("Backlog", ["backlog"], "backlog")
     elif page == "Played": inventory_page("Played & Abandoned", ["played", "abandoned"], "played")
     elif page ==: statistics_page()

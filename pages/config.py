@@ -58,19 +58,13 @@ def configuration_page() -> None:
             st.session_state["tag_order"] = [t["id"] for t in all_tags]
             
         known_ids = set(st.session_state["tag_order"])
-        new_order = list(st.session_state["tag_order"])
-        
-        # Enforce that newly created tags are pushed to the absolute top of the order
-        for t in all_tags:
-            if t["id"] not in known_ids:
-                new_order.insert(0, t["id"])
-                known_ids.add(t["id"])
-                
-        # Force Streamlit to recognize the state mutation
-        st.session_state["tag_order"] = new_order
+        new_tags = [t["id"] for t in all_tags if t["id"] not in known_ids]
+        if new_tags:
+            st.session_state["tag_order"] = new_tags + list(st.session_state["tag_order"])
         
         order_map = {tid: i for i, tid in enumerate(st.session_state["tag_order"])}
         all_tags.sort(key=lambda t: order_map.get(t["id"], 999999))
+
         if all_tags:
             h1, h2, h3, h4, h5, h6, h7 = st.columns([2.4, 2.6, 0.6, 3.3, 0.8, 0.8, 0.8])
             h1.markdown("**Name**")
@@ -158,10 +152,12 @@ def configuration_page() -> None:
                 for number, item in enumerate(to_update, start=1):
                     try:
                         results.append(f"{item['title']}: {enrich_one(item['id'], item['title'])}")
-                    except ProviderError as exc:
+                    except Exception as exc:
                         results.append(f"{item['title']}: {exc}")
                     progress.progress(number / len(to_update), text=f"Actualizando {number} de {len(to_update)}…")
                 progress.empty()
+                cached_list_tags.clear()
+
                 st.success("Proceso terminado.")
                 with st.expander("Ver resultados detallados"):
                     st.write("\n\n".join(results))
