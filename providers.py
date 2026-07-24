@@ -17,10 +17,8 @@ from database import DATA_DIR
 RAWG_BASE_URL = "https://api.rawg.io/api"
 COVERS_DIR = DATA_DIR / "covers"
 
-
 class ProviderError(RuntimeError):
     pass
-
 
 from interfaces import UnifiedGameData, MetadataProvider
 import database as db
@@ -125,12 +123,10 @@ class RAWGProvider(MetadataProvider):
             publishers=pubs
         )
 
-
 def _clear_igdb_token() -> None:
     """Remove cached IGDB token and its expiry from settings."""
     db.set_setting("igdb_access_token", "")
     db.set_setting("igdb_token_expires_at", "")
-
 
 def _get_igdb_token(client_id: str, client_secret: str) -> str:
     token = db.get_setting("igdb_access_token")
@@ -308,7 +304,6 @@ class IGDBProvider(MetadataProvider):
             developers=devs,
             publishers=pubs
         )
-
 
 def cache_cover(image_url: str | None, game_id: int) -> str | None:
     """Download a cover once to the local cache and return its relative path."""

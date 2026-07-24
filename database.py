@@ -19,53 +19,48 @@ DB_PATH = DATA_DIR / "game_library.db"
 
 DEFAULT_TAGS = [
     ("Early Access", "Status", "#E0A84A", 1),
-    ("Negative Reviews", "Reviews", "#D95D5D", 1),
-    ("Mixed Reviews", "Reviews", "#DB8B4A", 1),
-    ("Mod Required", "Requirement", "#8E6CD1", 0),
     ("Multiplayer", "Mode", "#4389D7", 0),
     ("Unreleased", "Status", "#8C8C8C", 1),
     ("Incomplete Content", "Status", "#A8745A", 1),
-    ("Unplayable", "Compatibility", "#CC4F6A", 1),
-    ("Uncategorized", "Other", "#7E8996", 0),
 ]
-
 
 def now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
-
 def normalize_title(value: str) -> str:
-    """Produce a stable, accent-insensitive comparison key for a title."""
+    """Generate normalized title key for comparison."""
     decomposed = unicodedata.normalize("NFKD", value)
     without_accents = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", " ", without_accents.lower()).strip()
 
+_conn: sqlite3.Connection | None = None
+
+def _get_connection() -> sqlite3.Connection:
+    """Return a long-lived module-level connection (created once, reused)."""
+    global _conn
+    if _conn is None:
+        DATA_DIR.mkdir(exist_ok=True)
+        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _conn.row_factory = sqlite3.Row
+        _conn.execute("PRAGMA foreign_keys = ON")
+        _conn.execute("PRAGMA journal_mode = WAL")
+    return _conn
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    DATA_DIR.mkdir(exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = _get_connection()
     try:
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    finally:
-        conn.close()
-
 
 def init_database() -> None:
-    """Create the schema and the small starter tag catalogue if needed."""
+    """Initialize database schema and default tags."""
     with connection() as conn:
         conn.executescript(
             """
-            CREATE TABLE IF NOT EXISTS schema_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
 
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -186,10 +181,6 @@ def init_database() -> None:
             conn.execute("ALTER TABLE games ADD COLUMN developer_info_json TEXT")
         except sqlite3.OperationalError:
             pass
-
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1')"
-        )
         stamp = now_iso()
         conn.executemany(
             """
@@ -199,9 +190,6 @@ def init_database() -> None:
             [(name, category, color, is_main, stamp) for name, category, color, is_main in DEFAULT_TAGS],
         )
 
-
-
-
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["ready_to_play"] = bool(item["ready_to_play"])
@@ -210,7 +198,6 @@ def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item["tags"] = tags_text.split(",") if tags_text else []
     item["years"] = [int(value) for value in years_text.split(",") if value]
     return item
-
 
 def list_games(statuses: Sequence[str] | None = None) -> list[dict[str, Any]]:
     clauses: list[str] = []
@@ -239,7 +226,6 @@ def list_games(statuses: Sequence[str] | None = None) -> list[dict[str, Any]]:
     with connection() as conn:
         return [_row_to_game(row) for row in conn.execute(query, parameters).fetchall()]
 
-
 def get_game(game_id: int) -> dict[str, Any] | None:
     query = """
         SELECT
@@ -261,14 +247,12 @@ def get_game(game_id: int) -> dict[str, Any] | None:
         row = conn.execute(query, (game_id,)).fetchone()
     return _row_to_game(row) if row else None
 
-
 def get_game_tags(game_id: int) -> list[int]:
     with connection() as conn:
         rows = conn.execute(
             "SELECT tag_id FROM game_tags WHERE game_id = ? ORDER BY tag_id", (game_id,)
         ).fetchall()
     return [row["tag_id"] for row in rows]
-
 
 def list_tags() -> list[dict[str, Any]]:
     with connection() as conn:
@@ -289,8 +273,8 @@ def list_tags() -> list[dict[str, Any]]:
             result.append(tag_dict)
         return result
 
-
 def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996", is_custom: bool = False, is_main: bool = False) -> int:
+    """Get or create custom user tag."""
     clean_name = name.strip()
     with connection() as conn:
         row = conn.execute("SELECT id FROM tags WHERE name = ?", (clean_name,)).fetchone()
@@ -302,6 +286,22 @@ def get_or_create_tag(name: str, category: str = "Other", color: str = "#7E8996"
         )
         return cursor.lastrowid
 
+def resolve_tags_via_aliases(raw_names: list[str]) -> set[int]:
+    """Look up raw provider tag names via the alias table.
+
+    Returns the set of tag IDs that matched.  Unknown names are silently
+    skipped — no new tags are ever created by this function.
+    """
+    cleaned = [n.strip().lower() for n in raw_names if n and n.strip()]
+    if not cleaned:
+        return set()
+    placeholders = ",".join(["?"] * len(cleaned))
+    with connection() as conn:
+        rows = conn.execute(
+            f"SELECT DISTINCT a.tag_id FROM tag_aliases a WHERE a.alias_name IN ({placeholders})",
+            cleaned,
+        ).fetchall()
+    return {r["tag_id"] for r in rows}
 
 def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main: bool = False) -> None:
     clean_name = name.strip()
@@ -312,7 +312,6 @@ def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main:
             "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, 1, ?, ?)",
             (clean_name, category.strip() or "Other", color, int(is_main), now_iso()),
         )
-
 
 def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False, aliases: str = "") -> None:
     if not name.strip():
@@ -327,12 +326,10 @@ def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool 
         for alias in set(alias_list):
             conn.execute("INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)", (alias, tag_id))
 
-
 def delete_tag(tag_id: int) -> None:
     with connection() as conn:
         conn.execute("DELETE FROM game_tags WHERE tag_id = ?", (tag_id,))
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
-
 
 def create_game(
     title: str,
@@ -368,7 +365,6 @@ def create_game(
         _history(conn, game_id, "created", {"status": status})
     return game_id
 
-
 def _set_game_tags(conn: sqlite3.Connection, game_id: int, tag_ids: Sequence[int]) -> None:
     conn.execute(
         "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 1)",
@@ -378,7 +374,6 @@ def _set_game_tags(conn: sqlite3.Connection, game_id: int, tag_ids: Sequence[int
         "INSERT OR IGNORE INTO game_tags(game_id, tag_id) VALUES (?, ?)",
         [(game_id, tag_id) for tag_id in tag_ids],
     )
-
 
 def update_game(
     game_id: int,
@@ -409,7 +404,6 @@ def update_game(
         )
         _set_game_tags(conn, game_id, tag_ids)
         _history(conn, game_id, "edited", {"title": clean_title})
-
 
 def add_or_select_estimate(
     game_id: int,
@@ -446,13 +440,11 @@ def add_or_select_estimate(
         )
         _history(conn, game_id, "playtime_updated", {"hours": hours, "source": source})
 
-
 def clear_selected_estimate(game_id: int) -> None:
     """Keep prior estimates as history but leave the game without an active duration."""
     with connection() as conn:
         conn.execute("UPDATE playtime_estimates SET selected = 0 WHERE game_id = ?", (game_id,))
         _history(conn, game_id, "playtime_cleared", {})
-
 
 def change_status(
     game_id: int, status: str, played_year: int | None = None, notes: str | None = None
@@ -480,11 +472,9 @@ def change_status(
             )
         _history(conn, game_id, "status_changed", {"status": status, "year": played_year})
 
-
 def delete_game(game_id: int) -> None:
     with connection() as conn:
         conn.execute("DELETE FROM games WHERE id = ?", (game_id,))
-
 
 def update_game_metadata(
     game_id: int, 
@@ -493,18 +483,19 @@ def update_game_metadata(
     provider_name: str, 
     local_cover_path: str | None
 ) -> None:
-    tag_ids = set()
-    for g in unified.genres:
-        tag_ids.add(get_or_create_tag(g, category="Género", color="#5C85A6"))
-    for t in unified.themes:
-        tag_ids.add(get_or_create_tag(t, category="Tema", color="#7A68A6"))
-    for gm in unified.game_modes:
-        if gm.lower() not in {"multiplayer", "multiplayedr"}:
-            tag_ids.add(get_or_create_tag(gm, category="Mode", color="#4389D7"))
-    for mm in unified.multiplayer_modes:
-        tag_ids.add(get_or_create_tag(mm, category="Mode", color="#4389D7"))
+    # Resolve provider tags via aliases
+    # Skip unrecognized tags
+    raw_tag_names: list[str] = []
+    raw_tag_names.extend(unified.genres)
+    raw_tag_names.extend(unified.themes)
+    raw_tag_names.extend(
+        gm for gm in unified.game_modes
+        if gm.lower() not in {"multiplayer", "multiplayedr"}
+    )
+    raw_tag_names.extend(unified.multiplayer_modes)
     if unified.game_status:
-        tag_ids.add(get_or_create_tag(unified.game_status, category="Status de Lanzamiento", color="#A8745A"))
+        raw_tag_names.append(unified.game_status)
+    tag_ids = resolve_tags_via_aliases(raw_tag_names)
 
     stamp = now_iso()
     with connection() as conn:
@@ -544,7 +535,7 @@ def update_game_metadata(
             (game_id, provider_name, unified.provider_id, raw_payload, stamp)
         )
         
-        # Remove old provider-assigned (non-custom) tags before adding new ones
+        # Refresh provider tags while preserving user tags
         conn.execute(
             "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 0)",
             (game_id,)
@@ -575,19 +566,16 @@ def clear_game_metadata(game_id: int) -> None:
         )
         _history(conn, game_id, "metadata_cleared", {})
 
-
 def _history(conn: sqlite3.Connection, game_id: int, event_type: str, details: dict[str, Any]) -> None:
     conn.execute(
         "INSERT INTO game_history(game_id, event_type, details_json, created_at) VALUES (?, ?, ?, ?)",
         (game_id, event_type, json.dumps(details, ensure_ascii=False), now_iso()),
     )
 
-
 def get_setting(key: str, default: str = "") -> str:
     with connection() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else default
-
 
 def set_setting(key: str, value: str) -> None:
     with connection() as conn:
@@ -598,7 +586,6 @@ def set_setting(key: str, value: str) -> None:
             """,
             (key, value, now_iso()),
         )
-
 
 def dashboard_metrics() -> dict[str, Any]:
     with connection() as conn:
@@ -653,10 +640,64 @@ def dashboard_metrics() -> dict[str, Any]:
         "margin_hours": margin,
     }
 
-
 def export_rows() -> list[dict[str, Any]]:
     rows = list_games()
     for row in rows:
         row["tags"] = ", ".join(row["tags"])
         row["years"] = ", ".join(str(year) for year in sorted(set(row["years"])))
     return rows
+
+# Cleanup utilities
+
+_DEFAULT_TAG_NAMES = frozenset(name for name, *_ in DEFAULT_TAGS)
+
+def cleanup_spurious_tags() -> int:
+    """Delete non-custom tags that were created by the old buggy enrichment.
+
+    A tag is considered spurious if:
+      • is_custom = 0  (not user-created)
+      • its name is NOT in DEFAULT_TAGS  (not a seeded tag)
+      • it has NO aliases in tag_aliases  (not part of the curated taxonomy)
+
+    Returns the number of tags deleted.
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT t.id, t.name
+            FROM tags t
+            LEFT JOIN tag_aliases a ON a.tag_id = t.id
+            WHERE t.is_custom = 0
+            GROUP BY t.id
+            HAVING COUNT(a.id) = 0
+            """
+        ).fetchall()
+        spurious = [r for r in rows if r["name"] not in _DEFAULT_TAG_NAMES]
+        if not spurious:
+            return 0
+        ids = [r["id"] for r in spurious]
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(f"DELETE FROM game_tags WHERE tag_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM tags WHERE id IN ({placeholders})", ids)
+    return len(spurious)
+
+def cleanup_orphan_covers() -> int:
+    """Delete cover image files not referenced by any game.  Returns count deleted."""
+    covers_dir = DATA_DIR / "covers"
+    if not covers_dir.exists():
+        return 0
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT cover_local_path FROM games WHERE cover_local_path IS NOT NULL"
+        ).fetchall()
+    referenced = set()
+    for r in rows:
+        path = r["cover_local_path"]
+        if path:
+            referenced.add(Path(path).name)
+    deleted = 0
+    for f in covers_dir.iterdir():
+        if f.is_file() and f.name not in referenced:
+            f.unlink()
+            deleted += 1
+    return deleted
