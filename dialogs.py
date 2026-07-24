@@ -1,5 +1,7 @@
 from __future__ import annotations
+import html as html_mod
 import json
+import sqlite3
 from datetime import datetime
 from typing import Any
 import streamlit as st
@@ -34,12 +36,15 @@ def edit_game_dialog(game_id: int) -> None:
         saved = st.form_submit_button("Save Changes", type="primary")
     if saved:
         try:
-            db.update_game(game_id, title=title, ready_to_play=ready, notes=notes, tag_ids=[label_to_id[name] for name in chosen_tags])
-            if hours > 0:
-                db.add_or_select_estimate(game_id, float(hours), source="Manual")
-            else:
-                db.clear_selected_estimate(game_id)
-        except Exception as exc:
+            db.update_game(
+                game_id,
+                title=title,
+                ready_to_play=ready,
+                notes=notes,
+                hours=float(hours) if hours > 0 else None,
+                tag_ids=[label_to_id[name] for name in chosen_tags],
+            )
+        except (ValueError, sqlite3.IntegrityError) as exc:
             st.error(f"Failed to save: {exc}")
             return
         st.session_state.pop("dialog", None)
@@ -69,6 +74,7 @@ def delete_game_dialog(game_id: int) -> None:
     if not item:
         st.session_state.pop("dialog", None)
         st.rerun()
+        return
     st.warning(f"You are about to delete **{item['title']}** and all its history. This action cannot be undone.")
     left, right = st.columns(2)
     if left.button("Delete definitivamente", type="primary"):
@@ -85,10 +91,12 @@ def clear_metadata_dialog(game_id: int) -> None:
     if not item:
         st.session_state.pop("dialog", None)
         st.rerun()
+        return
     st.warning(f"All downloaded details (cover, genres, etc.) will be deleted for **{item['title']}**. Are you sure?")
     left, right = st.columns(2)
     if left.button("Limpiar details", type="primary"):
         db.clear_game_metadata(game_id)
+        cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         st.rerun()
     if right.button("Cancel"):
@@ -102,6 +110,7 @@ def delete_tag_dialog(tag_id: int) -> None:
     if not tag:
         st.session_state.pop("dialog", None)
         st.rerun()
+        return
     st.warning(f"Are you sure you want to delete tag **{tag['name']}**? Games associated with it will lose it and this action cannot be undone.")
     left, right = st.columns(2)
     if left.button("Delete tag", type="primary", use_container_width=True):
@@ -121,9 +130,7 @@ def metadata_dialog(game_id: int) -> None:
         return
     st.subheader(item["title"])
     
-    provider_data = None
-    with db.connection() as conn:
-        provider_data = conn.execute("SELECT provider_name, raw_payload_json FROM game_provider_data WHERE game_id = ? ORDER BY fetched_at DESC LIMIT 1", (game_id,)).fetchone()
+    provider_data = db.get_game_provider_data(game_id)
     
     st.caption(f"Source: {provider_data['provider_name'] if provider_data else 'no info'}")
     
@@ -148,7 +155,7 @@ def metadata_dialog(game_id: int) -> None:
                 description = meta.get("summary") or "—"
                 if meta.get("rating"):
                     rating_str = f"{meta['rating']:.1f}/100"
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             pass
 
     a, b, c = st.columns(3)
@@ -160,19 +167,18 @@ def metadata_dialog(game_id: int) -> None:
         dev_info = json.loads(item.get("developer_info_json") or "{}")
         devs = ", ".join(dev_info.get("developers", [])) or "—"
         pubs = ", ".join(dev_info.get("publishers", [])) or "—"
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         devs = pubs = "—"
 
     st.write(f"**Developers:** {devs}")
     st.write(f"**Publishers:** {pubs}")
     
-    with db.connection() as conn:
-        tags = conn.execute("SELECT t.name, t.category FROM tags t JOIN game_tags gt ON t.id = gt.tag_id WHERE gt.game_id = ? ORDER BY t.category, t.name", (game_id,)).fetchall()
+    tags = db.get_game_tags_with_categories(game_id)
     
     if tags:
-        for cat in set(t["category"] for t in tags):
+        for cat in dict.fromkeys(t["category"] for t in tags):
             cat_tags = [t["name"] for t in tags if t["category"] == cat]
-            st.write(f"**{cat}:** {', '.join(cat_tags)}")
+            st.write(f"**{html_mod.escape(cat)}:** {', '.join(html_mod.escape(t) for t in cat_tags)}")
     else:
         st.write("No associated tags.")
         
@@ -210,7 +216,8 @@ def metadata_dialog(game_id: int) -> None:
 
 @st.dialog("Completar información", on_dismiss=dismiss_dialog)
 def enrich_game_dialog(game_id: int) -> None:
-    from pages.add_games import get_ordered_providers, enrich_one
+    from pages.add_games import enrich_one
+    from providers import get_ordered_providers
     item = db.get_game(game_id)
     if not item:
         st.error("Game no longer exists.")
@@ -233,8 +240,11 @@ def enrich_game_dialog(game_id: int) -> None:
             try:
                 result = enrich_one(game_id, item['title'])
                 st.toast(result)
+            except ProviderError as exc:
+                st.toast(f"Provider error: {exc}")
             except Exception as exc:
                 st.toast(f"Error inesperado: {exc}")
+        cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         st.rerun()
         

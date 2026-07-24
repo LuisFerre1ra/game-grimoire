@@ -4,24 +4,9 @@ from datetime import datetime
 from typing import Any
 import streamlit as st
 import database as db
-from providers import ProviderError, cache_cover, RAWGProvider, IGDBProvider
-from interfaces import MetadataProvider
+from interfaces import GameStatus
+from providers import ProviderError, cache_cover, get_ordered_providers
 from ui_helpers import cached_list_tags
-
-def get_ordered_providers() -> list[MetadataProvider]:
-    rawg_key = db.get_setting("rawg_api_key")
-    igdb_id = db.get_setting("igdb_client_id")
-    igdb_secret = db.get_setting("igdb_client_secret")
-    
-    priority = db.get_setting("provider_priority", "IGDB,RAWG").split(",")
-    
-    providers: list[MetadataProvider] = []
-    for p in priority:
-        if p.strip() == "RAWG" and rawg_key:
-            providers.append(RAWGProvider(rawg_key))
-        elif p.strip() == "IGDB" and igdb_id and igdb_secret:
-            providers.append(IGDBProvider(igdb_id, igdb_secret))
-    return providers
 
 def enrich_one(game_id: int, title: str) -> str:
     providers = get_ordered_providers()
@@ -42,8 +27,11 @@ def enrich_one(game_id: int, title: str) -> str:
                     pass
                 db.update_game_metadata(game_id, unified, json.dumps(raw, ensure_ascii=False), provider.get_name(), local_cover)
                 return f"Updated from {provider.get_name()}."
-        except Exception as exc:
+        except ProviderError as exc:
             last_error = f"{provider.get_name()} error: {exc}"
+            continue
+        except Exception as exc:
+            last_error = f"{provider.get_name()} error inesperado: {exc}"
             continue
     return last_error or "No se encontraron coincidencias en ningún proveedor."
 
@@ -67,8 +55,9 @@ def add_games_page() -> None:
     if not requested:
         st.warning("Please add at least one title.")
         return
-    status = {"Backlog": "backlog", "Played": "played", "Abandoned": "abandoned"}[destination]
-    existing = {item["normalized_title"] for item in db.list_games()}
+    status_map = {"Backlog": GameStatus.BACKLOG, "Played": GameStatus.PLAYED, "Abandoned": GameStatus.ABANDONED}
+    status = status_map[destination]
+    existing = db.get_all_normalized_titles()
     created: list[tuple[int, str]] = []
     skipped: list[str] = []
     for title in requested:
@@ -76,9 +65,10 @@ def add_games_page() -> None:
         if normalized in existing:
             skipped.append(title)
             continue
-        game_id = db.create_game(title, status=status, ready_to_play=ready if status == "backlog" else False, tag_ids=[label_to_id[name] for name in selected_tags])
-        if status in {"played", "abandoned"}:
-            db.change_status(game_id, status, datetime.now().year)
+        game_id = db.create_game(title, status=status, ready_to_play=ready if status == GameStatus.BACKLOG else False, tag_ids=[label_to_id[name] for name in selected_tags])
+        if status in {GameStatus.PLAYED, GameStatus.ABANDONED}:
+            outcome = "completed" if status == GameStatus.PLAYED else "abandoned"
+            db.add_play_event(game_id, outcome, datetime.now().year)
         existing.add(normalized)
         created.append((game_id, title))
     messages: list[str] = []

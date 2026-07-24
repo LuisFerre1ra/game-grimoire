@@ -5,10 +5,10 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 import database as db
-from providers import ProviderError
+from providers import ProviderError, get_ordered_providers
 from ui_helpers import cached_list_tags
 from dialogs import queue_dialog
-from pages.add_games import get_ordered_providers, enrich_one
+from pages.add_games import enrich_one
 
 def configuration_page() -> None:
     st.title("Settings")
@@ -49,8 +49,8 @@ def configuration_page() -> None:
                 db.add_tag(f"New tag {int(time.time() * 1000) % 10000}", "Other", "#7E8996", False)
                 cached_list_tags.clear()
                 st.rerun()
-            except Exception as exc:
-                st.error(f"Error creating: {exc}")
+            except ValueError as exc:
+                st.error(str(exc))
                 
         all_tags = cached_list_tags()
         
@@ -105,7 +105,7 @@ def configuration_page() -> None:
                             cached_list_tags.clear()
                             st.toast(f"«{new_name}» guardado", icon=":material/check_circle:")
                             st.rerun()
-                        except Exception as exc:
+                        except ValueError as exc:
                             st.error(str(exc))
 
                 with c7:
@@ -115,22 +115,14 @@ def configuration_page() -> None:
 
     with enrichment_tab:
         st.subheader("Update missing data")
-        games = db.list_games()
         if not get_ordered_providers():
             st.info("Configure a provider first (IGDB or RAWG) in Connections.")
-        elif not games:
-            st.info("No games to update.")
         else:
-            # Re-check what counts as missing info. In this new architecture, if they aren't in game_provider_data
-            missing_info = []
-            with db.connection() as conn:
-                for g in games:
-                    prov = conn.execute("SELECT 1 FROM game_provider_data WHERE game_id = ?", (g["id"],)).fetchone()
-                    if not prov:
-                        missing_info.append(g)
+            all_games = db.list_games()
+            missing_info = db.get_games_missing_provider_data()
             
             c1, c2 = st.columns(2)
-            c1.metric("Games in library", len(games))
+            c1.metric("Games in library", len(all_games))
             c2.metric("Games no info", len(missing_info))
             
             st.write("### Opciones de actualización")
@@ -144,7 +136,7 @@ def configuration_page() -> None:
             if btn_missing:
                 to_update = missing_info
             elif btn_all:
-                to_update = games
+                to_update = all_games
                 
             if to_update:
                 progress = st.progress(0, text="Actualizando datos…")

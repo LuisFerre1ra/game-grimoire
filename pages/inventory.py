@@ -1,4 +1,5 @@
 from __future__ import annotations
+import html as html_mod
 from typing import Any
 import pandas as pd
 import streamlit as st
@@ -7,7 +8,7 @@ import database as db
 from ui_helpers import cached_list_tags, format_hours, cover_reference, tag_html, readable_date
 from dialogs import game_actions
 
-def render_card(item: dict[str, Any], prefix: str) -> None:
+def render_card(item: dict[str, Any], prefix: str, main_tags_names: set[str]) -> None:
     with st.container(border=True):
         cover = cover_reference(item)
         if cover:
@@ -16,15 +17,13 @@ def render_card(item: dict[str, Any], prefix: str) -> None:
             st.markdown('<div class="game-placeholder">Sin cover</div>', unsafe_allow_html=True)
             st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
             
-        all_tags = cached_list_tags()
-        main_tags_names = {t["name"] for t in all_tags if t.get("is_main")}
         special_tags = [t for t in item["tags"] if t in main_tags_names]
         normal_tags = [t for t in item["tags"] if t not in main_tags_names]
         
         if special_tags:
             st.markdown(f"<div class='special-tags-container'>{tag_html(special_tags, limit=10, show_empty=False)}</div>", unsafe_allow_html=True)
             
-        safe_title = item["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        safe_title = html_mod.escape(item["title"])
         title_html = f'<div title="{safe_title}" style="display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-weight: bold; line-height: 1.4; height: 1.4em; margin-bottom: 0.5rem;">{safe_title}</div>'
         st.markdown(title_html, unsafe_allow_html=True)
         
@@ -107,14 +106,18 @@ def render_cards(items: list[dict[str, Any]], key: str) -> None:
             st.rerun()
 
     render_pagination("top")
-        
+
+    # Precompute main_tags_names once for all cards (PERF-04)
+    all_tags = cached_list_tags()
+    main_tags_names = {t["name"] for t in all_tags if t.get("is_main")}
+
     current = items[(page - 1) * page_size : page * page_size]
     st.caption(f"Mostrando {len(current)} de {len(items)} games")
     for start in range(0, len(current), 4):
         columns = st.columns(4)
         for column, item in zip(columns, current[start : start + 4]):
             with column:
-                render_card(item, f"{key}_{item['id']}")
+                render_card(item, f"{key}_{item['id']}", main_tags_names)
                 
     render_pagination("bottom")
 
@@ -141,19 +144,8 @@ def inventory_page(title: str, statuses: list[str], key: str) -> None:
     if key in ("backlog", "played"):
         known = [float(item["hours"]) for item in items if item.get("hours") is not None]
         missing = len(items) - len(known)
-        known_sum = sum(known)
-        predicted_total: float | None = None
-        margin: float | None = None
-        
-        if missing and len(known) > 1:
-            mean = known_sum / len(known)
-            variance = sum((value - mean) ** 2 for value in known) / (len(known) - 1)
-            std_dev = variance ** 0.5
-            predicted_total = known_sum + missing * mean
-            margin = 1.28 * std_dev * (missing + (missing**2 / len(known))) ** 0.5
-        elif not missing:
-            predicted_total = known_sum
-            margin = 0
+        known_sum = sum(known) if known else 0.0
+        predicted_total, margin = db.estimate_total_hours(known, missing)
 
         a, b, c = st.columns(3)
         a.metric("Games", len(items))

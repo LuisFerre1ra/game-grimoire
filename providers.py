@@ -13,15 +13,15 @@ from typing import Any
 import requests
 
 from database import DATA_DIR
+from interfaces import UnifiedGameData, MetadataProvider, GameStatus
+
+import database as db
 
 RAWG_BASE_URL = "https://api.rawg.io/api"
 COVERS_DIR = DATA_DIR / "covers"
 
 class ProviderError(RuntimeError):
     pass
-
-from interfaces import UnifiedGameData, MetadataProvider
-import database as db
 
 def map_raw_tags(raw_tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
     mapped = {
@@ -31,16 +31,9 @@ def map_raw_tags(raw_tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
     unmapped = []
     if not raw_tags:
         return mapped, unmapped
-        
-    placeholders = ",".join(["?"] * len(raw_tags))
-    lower_tags = [r.lower() for r in raw_tags]
-    
-    with db.connection() as conn:
-        rows = conn.execute(
-            f"SELECT a.alias_name, t.name, t.category FROM tag_aliases a JOIN tags t ON a.tag_id = t.id WHERE a.alias_name IN ({placeholders})",
-            lower_tags
-        ).fetchall()
-        
+
+    rows = db.lookup_aliases_by_names(raw_tags)
+
     found_aliases = {}
     for r in rows:
         found_aliases[r["alias_name"]] = (r["name"], r["category"])
@@ -60,7 +53,7 @@ class RAWGProvider(MetadataProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key.strip()
         if not self.api_key:
-            raise ProviderError("Configure a RAWG API key first.")
+            raise ProviderError("Please configure a RAWG API key before fetching metadata.")
 
     def get_name(self) -> str:
         return "RAWG"
@@ -145,8 +138,15 @@ def _get_igdb_token(client_id: str, client_secret: str) -> str:
         # Token expired or expiry unparseable – clear and re-fetch
         _clear_igdb_token()
 
-    url = f"https://id.twitch.tv/oauth2/token?client_id={client_id}&client_secret={client_secret}&grant_type=client_credentials"
-    resp = requests.post(url, timeout=20)
+    resp = requests.post(
+        "https://id.twitch.tv/oauth2/token",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "client_credentials",
+        },
+        timeout=20,
+    )
     if not resp.ok:
         raise ProviderError("Could not obtain IGDB token with given credentials.")
     data = resp.json()
@@ -310,6 +310,32 @@ class IGDBProvider(MetadataProvider):
             developers=devs,
             publishers=pubs
         )
+
+# Provider factory
+
+def get_provider_by_name(name: str) -> MetadataProvider | None:
+    """Instantiate a provider by name using saved settings. Returns None if not configured."""
+    name = name.strip()
+    if name == "RAWG":
+        key = db.get_setting("rawg_api_key")
+        if key:
+            return RAWGProvider(key)
+    elif name == "IGDB":
+        client_id = db.get_setting("igdb_client_id")
+        secret = db.get_setting("igdb_client_secret")
+        if client_id and secret:
+            return IGDBProvider(client_id, secret)
+    return None
+
+def get_ordered_providers() -> list[MetadataProvider]:
+    """Return provider instances in the user-configured priority order."""
+    priority = db.get_setting("provider_priority", "IGDB,RAWG").split(",")
+    providers: list[MetadataProvider] = []
+    for name in priority:
+        p = get_provider_by_name(name.strip())
+        if p:
+            providers.append(p)
+    return providers
 
 def cache_cover(image_url: str | None, game_id: int) -> str | None:
     """Download a cover once to the local cache and return its relative path."""
