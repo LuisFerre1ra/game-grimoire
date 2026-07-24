@@ -41,7 +41,7 @@ def configuration_page() -> None:
         all_tags = cached_list_tags()
         existing_cats = sorted(list(set(t["category"] for t in all_tags if t.get("category"))))
         if not existing_cats:
-            existing_cats = ["Status", "Reviews", "Mode", "Requirement", "Compatibility", "Other"]
+            existing_cats = ["Genres", "Themes", "Game modes", "Age Rating", "Status", "Reviews", "Requirement", "Compatibility", "Other"]
         cat_options = existing_cats + ["+ New category..."]
         
         if st.button("+ Add new tag", type="primary"):
@@ -72,19 +72,21 @@ def configuration_page() -> None:
         order_map = {tid: i for i, tid in enumerate(st.session_state["tag_order"])}
         all_tags.sort(key=lambda t: order_map.get(t["id"], 999999))
         if all_tags:
-            h1, h2, h3, h4, h5, h6 = st.columns([3, 2.5, 0.6, 3, 0.6, 1.1])
+            h1, h2, h3, h4, h5, h6, h7 = st.columns([2.4, 2.6, 0.6, 3.3, 0.8, 0.8, 0.8])
             h1.markdown("**Name**")
             h2.markdown("**Category**")
             h3.markdown("**Color**")
             h4.markdown("**Alias**")
             h5.markdown("<div style='text-align: center; font-weight: bold;'>Principal</div>", unsafe_allow_html=True)
-            h6.markdown("<div style='text-align: center; font-weight: bold;'>Acción</div>", unsafe_allow_html=True)
-            
+            h6.markdown("<div style='text-align: center; font-weight: bold;'>Save</div>", unsafe_allow_html=True)
+            h7.markdown("<div style='text-align: center; font-weight: bold;'>Delete</div>", unsafe_allow_html=True)
+
             for tag in all_tags:
-                c1, c2, c3, c4, c5, c6 = st.columns([3, 2.5, 0.6, 3, 0.6, 1.1])
                 t_id = tag["id"]
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([2.4, 2.6, 0.6, 3.3, 0.8, 0.8, 0.8])
+
                 new_name = c1.text_input("Name", value=tag["name"], key=f"t_name_{t_id}", label_visibility="collapsed")
-                
+
                 current_cat = tag["category"]
                 cat_idx = cat_options.index(current_cat) if current_cat in cat_options else 0
                 cat_val = c2.selectbox("Category", cat_options, index=cat_idx, key=f"t_cat_sel_{t_id}", label_visibility="collapsed")
@@ -92,31 +94,31 @@ def configuration_page() -> None:
                     new_cat = c2.text_input("New category", value="", key=f"t_cat_new_{t_id}", label_visibility="collapsed", placeholder="Escribe aquí...")
                 else:
                     new_cat = cat_val
-                
                 effective_cat = tag["category"] if (cat_val == "+ New category..." and not new_cat.strip()) else new_cat.strip()
-                
+
                 new_color = c3.color_picker("Color", value=tag["color"], key=f"t_col_{t_id}", label_visibility="collapsed")
-                
                 new_aliases = c4.text_input("Alias", value=tag.get("aliases", ""), key=f"t_aliases_{t_id}", label_visibility="collapsed")
-                
+
                 with c5:
                     _, c_chk, _ = st.columns([1, 1.5, 1])
                     new_main = c_chk.checkbox("Sí", value=bool(tag.get("is_main", 0)), key=f"t_main_{t_id}", label_visibility="collapsed")
-                
+
+                # Explicit Save button only write to DB when the user clicks it
                 with c6:
+                    if st.button("", icon=":material/save:", key=f"save_{t_id}", use_container_width=True, help="Save changes"):
+                        try:
+                            db.update_tag(t_id, new_name, effective_cat, new_color, new_main, new_aliases)
+                            cached_list_tags.clear()
+                            st.toast(f"«{new_name}» guardado", icon=":material/check_circle:")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+                with c7:
                     st.markdown('<div class="delete-btn-wrapper"></div>', unsafe_allow_html=True)
-                    if st.button("Delete", key=f"del_{t_id}", type="secondary", use_container_width=True):
+                    if st.button("", icon=":material/delete:", key=f"del_{t_id}", type="secondary", use_container_width=True, help="Delete tag"):
                         queue_dialog("delete_tag", t_id)
-                
-                changed = (new_name != tag["name"] or effective_cat != tag["category"] or new_color != tag["color"] or new_main != bool(tag.get("is_main", 0)) or new_aliases != tag.get("aliases", ""))
-                
-                if changed:
-                    try:
-                        db.update_tag(t_id, new_name, effective_cat, new_color, new_main, new_aliases)
-                        cached_list_tags.clear()
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+
     with enrichment_tab:
         st.subheader("Update missing data")
         games = db.list_games()

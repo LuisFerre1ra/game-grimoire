@@ -24,7 +24,10 @@ from interfaces import UnifiedGameData, MetadataProvider
 import database as db
 
 def map_raw_tags(raw_tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
-    mapped = {"Genres": [], "Themes": [], "Game Modes": []}
+    mapped = {
+        "Genres": [], "Themes": [], "Game modes": [], "Age Rating": [],
+        "Status": [], "Reviews": [], "Requirement": [], "Compatibility": [], "Other": []
+    }
     unmapped = []
     if not raw_tags:
         return mapped, unmapped
@@ -102,6 +105,8 @@ class RAWGProvider(MetadataProvider):
             age_ratings.append(f"ESRB: {data['esrb_rating']['name']}")
             
         raw_tags = []
+        if data.get("esrb_rating") and data["esrb_rating"].get("name"):
+            raw_tags.append(data["esrb_rating"]["name"])
         raw_tags.extend([g.get("name") for g in data.get("genres", []) if g.get("name")])
         raw_tags.extend([t.get("name") for t in data.get("tags", []) if t.get("name")])
         mapped, unmapped = map_raw_tags(raw_tags)
@@ -114,10 +119,10 @@ class RAWGProvider(MetadataProvider):
             cover_url=data.get("background_image"),
             total_rating=data.get("metacritic") or data.get("rating"),
             playtime_hours=data.get("playtime"),
-            age_ratings=age_ratings,
+            age_ratings=mapped.get("Age Rating") or age_ratings,
             genres=mapped.get("Genres", []),
             themes=mapped.get("Themes", []),
-            game_modes=mapped.get("Game Modes", []),
+            game_modes=mapped.get("Game modes", []),
             multiplayer_modes=[],
             developers=devs,
             publishers=pubs
@@ -283,7 +288,8 @@ class IGDBProvider(MetadataProvider):
             if mp.get("lancoop"): raw_tags.append("LAN Co-op")
             if mp.get("offlinecoop"): raw_tags.append("Offline Co-op")
             if mp.get("onlinecoop"): raw_tags.append("Online Co-op")
-            if mp.get("dropin"): raw_tags.append("Drop-in/Drop-out")
+        if game_status:
+            raw_tags.append(game_status)
 
         mapped, unmapped = map_raw_tags(raw_tags)
 
@@ -295,10 +301,10 @@ class IGDBProvider(MetadataProvider):
             cover_url=cover_url,
             total_rating=data.get("rating"),
             playtime_hours=None,
-            age_ratings=[],
+            age_ratings=mapped.get("Age Rating", []),
             genres=mapped.get("Genres", []),
             themes=mapped.get("Themes", []),
-            game_modes=mapped.get("Game Modes", []),
+            game_modes=mapped.get("Game modes", []),
             multiplayer_modes=[],
             game_status=game_status,
             developers=devs,

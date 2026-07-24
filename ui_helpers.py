@@ -19,8 +19,8 @@ def inject_styles() -> None:
           .game-placeholder {aspect-ratio: 3 / 4; width: 100%; display:flex; flex-direction:column; align-items:center;
             justify-content:center; border-radius:.55rem; color:#d7e3f5; background:linear-gradient(145deg,#24334d,#121b2b); font-size:.9rem;}
           .game-placeholder small {font-size:.78rem; margin-top:.55rem; color:#aebed2;}
-          .tag-chip {display:inline-block; margin:.2rem .4rem .2rem 0; padding:.1rem .45rem; border-radius:999px;
-            background:#27374d; color:#e6eefb; font-size:.78rem;}
+          .tag-chip {display:inline-block; margin:.2rem .4rem .2rem 0; padding:.12rem .55rem; border-radius:999px;
+            background:#27374d; color:#ffffff; font-size:.78rem; font-weight:500; text-shadow:0px 1px 2px rgba(0,0,0,0.6);}
           .muted {color:#9aa8ba; font-size:.86rem;}
           div[data-testid="stImage"] img {aspect-ratio: 3 / 4 !important; width:100% !important; height: auto !important; object-fit:cover; border-radius:.55rem;}
           div[data-testid="stFullScreenFrame"] > div > div:first-child {padding: 0.5rem; top: 0 !important;}
