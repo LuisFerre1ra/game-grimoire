@@ -1,0 +1,260 @@
+from __future__ import annotations
+import json
+from datetime import datetime
+from typing import Any
+import streamlit as st
+import database as db
+from providers import ProviderError, map_raw_tags
+from ui_helpers import cached_list_tags, STATUS_LABELS, readable_date, format_hours, cover_reference
+
+def queue_dialog(kind: str, game_id: int) -> None:
+    st.session_state["dialog"] = {"kind": kind, "game_id": game_id}
+
+def dismiss_dialog() -> None:
+    """Reset active dialog session state."""
+    st.session_state.pop("dialog", None)
+
+@st.dialog("Edit game", on_dismiss=dismiss_dialog)
+def edit_game_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.error("Game no longer exists.")
+        return
+    tags = cached_list_tags()
+    custom_tags = [t for t in tags if t["is_custom"]]
+    label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
+    selected_ids = set(db.get_game_tags(game_id))
+    selected = [tag["name"] for tag in custom_tags if tag["id"] in selected_ids]
+    with st.form(f"edit_game_{game_id}"):
+        title = st.text_input("Title", value=item["title"])
+        ready = st.checkbox("Ready to play", value=item["ready_to_play"])
+        chosen_tags = st.multiselect("Personal Tags", list(label_to_id), default=selected)
+        notes = st.text_area("Personal Notes", value=item.get("notes") or "", height=90)
+        hours = st.number_input("Playtime (hours; 0 to leave undefined)", min_value=0.0, value=float(item["hours"] or 0), step=0.5)
+        saved = st.form_submit_button("Save Changes", type="primary")
+    if saved:
+        try:
+            db.update_game(game_id, title=title, ready_to_play=ready, notes=notes, tag_ids=[label_to_id[name] for name in chosen_tags])
+            if hours > 0:
+                db.add_or_select_estimate(game_id, float(hours), source="Manual")
+            else:
+                db.clear_selected_estimate(game_id)
+        except Exception as exc:
+            st.error(f"Failed to save: {exc}")
+            return
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+@st.dialog("Cambiar status", on_dismiss=dismiss_dialog)
+def status_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.error("Game no longer exists.")
+        return
+    options = list(STATUS_LABELS)
+    status = st.selectbox("Status", options, index=options.index(item["status"]), format_func=lambda value: STATUS_LABELS[value])
+    year: int | None = None
+    event_notes = ""
+    if status in {"played", "abandoned"}:
+        year = int(st.number_input("Year Played", min_value=1900, max_value=2200, value=datetime.now().year, step=1))
+        event_notes = st.text_area("Session Notes (optional)", height=80)
+    if st.button("Save Status", type="primary"):
+        db.change_status(game_id, status, year, event_notes)
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+@st.dialog("Delete game", on_dismiss=dismiss_dialog)
+def delete_game_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    st.warning(f"You are about to delete **{item['title']}** and all its history. This action cannot be undone.")
+    left, right = st.columns(2)
+    if left.button("Delete definitivamente", type="primary"):
+        db.delete_game(game_id)
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    if right.button("Cancel"):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+@st.dialog("Limpiar details", on_dismiss=dismiss_dialog)
+def clear_metadata_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    st.warning(f"All downloaded details (cover, genres, etc.) will be deleted for **{item['title']}**. Are you sure?")
+    left, right = st.columns(2)
+    if left.button("Limpiar details", type="primary"):
+        db.clear_game_metadata(game_id)
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    if right.button("Cancel"):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+@st.dialog("Delete tag", on_dismiss=dismiss_dialog)
+def delete_tag_dialog(tag_id: int) -> None:
+    all_tags = cached_list_tags()
+    tag = next((t for t in all_tags if t["id"] == tag_id), None)
+    if not tag:
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    st.warning(f"Are you sure you want to delete tag **{tag['name']}**? Games associated with it will lose it and this action cannot be undone.")
+    left, right = st.columns(2)
+    if left.button("Delete tag", type="primary", use_container_width=True):
+        db.delete_tag(tag_id)
+        cached_list_tags.clear()
+        st.session_state.pop("dialog", None)
+        st.rerun()
+    if right.button("Cancel", use_container_width=True):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+@st.dialog("Game details", on_dismiss=dismiss_dialog, width="large")
+def metadata_dialog(game_id: int) -> None:
+    item = db.get_game(game_id)
+    if not item:
+        st.error("Game no longer exists.")
+        return
+    st.subheader(item["title"])
+    
+    provider_data = None
+    with db.connection() as conn:
+        provider_data = conn.execute("SELECT provider_name, raw_payload_json FROM game_provider_data WHERE game_id = ? ORDER BY fetched_at DESC LIMIT 1", (game_id,)).fetchone()
+    
+    st.caption(f"Source: {provider_data['provider_name'] if provider_data else 'no info'}")
+    
+    rating_str = "—"
+    playtime = format_hours(item.get("hours"))
+    age_rating = "—"
+    description = "—"
+
+    raw_payload_meta = {}
+    if provider_data:
+        try:
+            meta = json.loads(provider_data["raw_payload_json"])
+            raw_payload_meta = meta
+            if provider_data["provider_name"] == "RAWG":
+                description = meta.get("description_raw") or meta.get("description") or "—"
+                esrb = meta.get("esrb_rating")
+                if esrb and "name" in esrb:
+                    age_rating = esrb["name"]
+                if meta.get("rating"):
+                    rating_str = f"{meta['rating']}/{meta.get('rating_top', 5)}"
+            elif provider_data["provider_name"] == "IGDB":
+                description = meta.get("summary") or "—"
+                if meta.get("rating"):
+                    rating_str = f"{meta['rating']:.1f}/100"
+        except json.JSONDecodeError:
+            pass
+
+    a, b, c = st.columns(3)
+    a.metric("Lanzamiento", readable_date(item.get("release_date")))
+    b.metric("Duration", playtime)
+    c.metric("Valoración", rating_str)
+
+    try:
+        dev_info = json.loads(item.get("developer_info_json") or "{}")
+        devs = ", ".join(dev_info.get("developers", [])) or "—"
+        pubs = ", ".join(dev_info.get("publishers", [])) or "—"
+    except json.JSONDecodeError:
+        devs = pubs = "—"
+
+    st.write(f"**Developers:** {devs}")
+    st.write(f"**Publishers:** {pubs}")
+    
+    with db.connection() as conn:
+        tags = conn.execute("SELECT t.name, t.category FROM tags t JOIN game_tags gt ON t.id = gt.tag_id WHERE gt.game_id = ? ORDER BY t.category, t.name", (game_id,)).fetchall()
+    
+    if tags:
+        for cat in set(t["category"] for t in tags):
+            cat_tags = [t["name"] for t in tags if t["category"] == cat]
+            st.write(f"**{cat}:** {', '.join(cat_tags)}")
+    else:
+        st.write("No associated tags.")
+        
+    if raw_payload_meta:
+        raw_tags = []
+        if provider_data["provider_name"] == "RAWG":
+            raw_tags.extend([g.get("name") for g in raw_payload_meta.get("genres", []) if g.get("name")])
+            raw_tags.extend([t.get("name") for t in raw_payload_meta.get("tags", []) if t.get("name")])
+        elif provider_data["provider_name"] == "IGDB":
+            raw_tags.extend([g.get("name") for g in raw_payload_meta.get("genres", []) if g.get("name")])
+            raw_tags.extend([t.get("name") for t in raw_payload_meta.get("themes", []) if t.get("name")])
+            raw_tags.extend([m.get("name") for m in raw_payload_meta.get("game_modes", []) if m.get("name")])
+            for mp in raw_payload_meta.get("multiplayer_modes", []):
+                if mp.get("campaigncoop"): raw_tags.append("Campaign Co-op")
+                if mp.get("lancoop"): raw_tags.append("LAN Co-op")
+                if mp.get("offlinecoop"): raw_tags.append("Offline Co-op")
+                if mp.get("onlinecoop"): raw_tags.append("Online Co-op")
+                if mp.get("dropin"): raw_tags.append("Drop-in/Drop-out")
+        
+        if raw_tags:
+
+            _, unmapped = map_raw_tags(raw_tags)
+            if unmapped:
+                st.write(f"**Other Tags (Unmapped):** {', '.join(sorted(set(unmapped)))}")
+        
+    st.write(f"**Description:** {description}")
+    if item.get("cover_source_url"):
+        st.link_button("Abrir imagen de origen", item["cover_source_url"])
+    if provider_data:
+        with st.expander("Internal Archive"):
+            st.json(json.loads(provider_data["raw_payload_json"]))
+
+@st.dialog("Completar información", on_dismiss=dismiss_dialog)
+def enrich_game_dialog(game_id: int) -> None:
+    from pages.add_games import get_ordered_providers, enrich_one
+    item = db.get_game(game_id)
+    if not item:
+        st.error("Game no longer exists.")
+        return
+    
+    providers = get_ordered_providers()
+    if not providers:
+        st.warning("Configure credentials for a provider in Settings.")
+        if st.button("Close"):
+            st.session_state.pop("dialog", None)
+            st.rerun()
+        return
+
+    st.write(f"Search and update details for **{item['title']}** online?")
+    st.caption("Configured providers will be used in order.")
+    
+    left, right = st.columns(2)
+    if left.button("Update data", type="primary"):
+        with st.spinner("Buscando metadatos..."):
+            try:
+                result = enrich_one(game_id, item['title'])
+                st.toast(result)
+            except Exception as exc:
+                st.toast(f"Error inesperado: {exc}")
+        st.session_state.pop("dialog", None)
+        st.rerun()
+        
+    if right.button("Cancel"):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+def show_pending_dialog() -> None:
+    active = st.session_state.get("dialog")
+    if active:
+        {"edit": edit_game_dialog, "status": status_dialog, "delete": delete_game_dialog, "metadata": metadata_dialog, "enrich": enrich_game_dialog, "clear_metadata": clear_metadata_dialog, "delete_tag": delete_tag_dialog}[active["kind"]](active["game_id"])
+
+def game_actions(item: dict[str, Any], prefix: str) -> None:
+    col1, col2 = st.columns([4, 1])
+        
+    enrich_label = "Reemplazar información" if item.get("metadata_source") or item.get("release_date") else "Completar información"
+        
+    with col1:
+        st.button("Details", key=f"{prefix}_details", type="primary", use_container_width=True, on_click=queue_dialog, args=("metadata", item["id"]))
+
+    with col2:
+        is_active_dialog = st.session_state.get("dialog") and st.session_state["dialog"]["game_id"] == item["id"]
+        popover_key = f"{prefix}_popover_{'open' if is_active_dialog else 'closed'}"
+        with st.popover("⋮", help="Actions", use_container_width=True, key=popover_key):
+            for kind, label in [("edit", "Edit"), ("status", "Change status"), ("enrich", enrich_label), ("clear_metadata", "Limpiar details"), ("delete", "Delete")]:
+                st.button(label, key=f"{prefix}_{kind}", type="tertiary", use_container_width=True, on_click=queue_dialog, args=(kind, item["id"]))
