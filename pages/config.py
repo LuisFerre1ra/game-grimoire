@@ -12,36 +12,36 @@ from pages.add_games import enrich_one
 
 def configuration_page() -> None:
     st.title("Settings")
-    connection_tab, tags_tab, enrichment_tab, export_tab = st.tabs(["Connections", "Tags", "Enrichment"ualizar catálogo", "Exportar"])
+    connection_tab, tags_tab, enrichment_tab, export_tab = st.tabs(["Connections", "Tags", "Update catalogue", "Export"])
     with connection_tab:
-        st.subheader("Servicios optionales")
-        st.caption("The application works without external services; los proveedores se consultan sólo al pedirlo.")
+        st.subheader("Optional services")
+        st.caption("The app works without external services; providers are only queried on request.")
         with st.form("connections"):
             current_val = db.get_setting("provider_priority", "IGDB,RAWG")
             default_selection = [p for p in current_val.split(",") if p in ["IGDB", "RAWG"]]
             
             provider_order_list = st.multiselect(
-                "Orden de prioridad de proveedores (selecciona en orden de preferencia)", 
+                "Provider priority order (select in order of preference)", 
                 options=["IGDB", "RAWG"], 
                 default=default_selection
             )
-            rawg_key = st.text_input("Key de API de RAWG", value=db.get_setting("rawg_api_key"), type="password")
-            igdb_id = st.text_input("Client ID de IGDB", value=db.get_setting("igdb_client_id"))
-            igdb_secret = st.text_input("Client Secret de IGDB", value=db.get_setting("igdb_client_secret"), type="password")
-            saved = st.form_submit_button("Save configuration")
+            rawg_key = st.text_input("RAWG API Key", value=db.get_setting("rawg_api_key"), type="password")
+            igdb_id = st.text_input("IGDB Client ID", value=db.get_setting("igdb_client_id"))
+            igdb_secret = st.text_input("IGDB Client Secret", value=db.get_setting("igdb_client_secret"), type="password")
+            saved = st.form_submit_button("Save settings")
         if saved:
             db.set_setting("provider_priority", ",".join(provider_order_list))
             db.set_setting("rawg_api_key", rawg_key.strip())
             db.set_setting("igdb_client_id", igdb_id.strip())
             db.set_setting("igdb_client_secret", igdb_secret.strip())
-            st.success("Settings guardada localmente.")
+            st.success("Settings saved locally.")
     with tags_tab:
-        st.subheader("Catálogo de tags")
+        st.subheader("Tag catalogue")
         
         all_tags = cached_list_tags()
         existing_cats = sorted(list(set(t["category"] for t in all_tags if t.get("category"))))
         if not existing_cats:
-            existing_cats = ["Genres", "Themes", "Game modes", "Age Rating", "Status", "Reviews", "Requirement", "Compatibility", "Other"]
+            existing_cats = ["Genres", "Themes", "Game modes", "Age Rating", "Status", "Reviews", "Requirements", "Compatibility", "Other"]
         cat_options = existing_cats + ["+ New category..."]
         
         if st.button("+ Add new tag", type="primary"):
@@ -70,8 +70,8 @@ def configuration_page() -> None:
             h1.markdown("**Name**")
             h2.markdown("**Category**")
             h3.markdown("**Color**")
-            h4.markdown("**Alias**")
-            h5.markdown("<div style='text-align: center; font-weight: bold;'>Principal</div>", unsafe_allow_html=True)
+            h4.markdown("**Aliases**")
+            h5.markdown("<div style='text-align: center; font-weight: bold;'>Main</div>", unsafe_allow_html=True)
             h6.markdown("<div style='text-align: center; font-weight: bold;'>Save</div>", unsafe_allow_html=True)
             h7.markdown("<div style='text-align: center; font-weight: bold;'>Delete</div>", unsafe_allow_html=True)
 
@@ -85,17 +85,17 @@ def configuration_page() -> None:
                 cat_idx = cat_options.index(current_cat) if current_cat in cat_options else 0
                 cat_val = c2.selectbox("Category", cat_options, index=cat_idx, key=f"t_cat_sel_{t_id}", label_visibility="collapsed")
                 if cat_val == "+ New category...":
-                    new_cat = c2.text_input("New category", value="", key=f"t_cat_new_{t_id}", label_visibility="collapsed", placeholder="Escribe aquí...")
+                    new_cat = c2.text_input("New category", value="", key=f"t_cat_new_{t_id}", label_visibility="collapsed", placeholder="Type here...")
                 else:
                     new_cat = cat_val
                 effective_cat = tag["category"] if (cat_val == "+ New category..." and not new_cat.strip()) else new_cat.strip()
 
                 new_color = c3.color_picker("Color", value=tag["color"], key=f"t_col_{t_id}", label_visibility="collapsed")
-                new_aliases = c4.text_input("Alias", value=tag.get("aliases", ""), key=f"t_aliases_{t_id}", label_visibility="collapsed")
+                new_aliases = c4.text_input("Aliases", value=tag.get("aliases", ""), key=f"t_aliases_{t_id}", label_visibility="collapsed")
 
                 with c5:
                     _, c_chk, _ = st.columns([1, 1.5, 1])
-                    new_main = c_chk.checkbox("Sí", value=bool(tag.get("is_main", 0)), key=f"t_main_{t_id}", label_visibility="collapsed")
+                    new_main = c_chk.checkbox("Yes", value=bool(tag.get("is_main", 0)), key=f"t_main_{t_id}", label_visibility="collapsed")
 
                 # Explicit Save button only write to DB when the user clicks it
                 with c6:
@@ -103,7 +103,7 @@ def configuration_page() -> None:
                         try:
                             db.update_tag(t_id, new_name, effective_cat, new_color, new_main, new_aliases)
                             cached_list_tags.clear()
-                            st.toast(f"«{new_name}» guardado", icon=":material/check_circle:")
+                            st.toast(f"'{new_name}' saved", icon=":material/check_circle:")
                             st.rerun()
                         except ValueError as exc:
                             st.error(str(exc))
@@ -123,14 +123,14 @@ def configuration_page() -> None:
             
             c1, c2 = st.columns(2)
             c1.metric("Games in library", len(all_games))
-            c2.metric("Games no info", len(missing_info))
+            c2.metric("Games without info", len(missing_info))
             
-            st.write("### Opciones de actualización")
-            st.write("**Option A: Search missing data**\nBusca details y covers únicamente para los games que aún no tienen información.")
-            btn_missing = st.button("Search missing data", disabled=len(missing_info) == 0, type="primary")
+            st.write("### Update options")
+            st.write("**Option A: Fetch missing data**\nFetches details and covers only for games that have no information yet.")
+            btn_missing = st.button("Fetch missing data", disabled=len(missing_info) == 0, type="primary")
             
-            st.write("**Opción B: Actualización completa**\nVuelve a descargar la información de todos tus games. Útil si quieres refrescar las valoraciones o covers.")
-            btn_all = st.button("Update whole collection")
+            st.write("**Option B: Full update**\nRe-downloads information for all your games. Useful to refresh ratings or covers.")
+            btn_all = st.button("Update entire collection")
             
             to_update = []
             if btn_missing:
@@ -139,25 +139,25 @@ def configuration_page() -> None:
                 to_update = all_games
                 
             if to_update:
-                progress = st.progress(0, text="Actualizando datos…")
+                progress = st.progress(0, text="Updating data...")
                 results: list[str] = []
                 for number, item in enumerate(to_update, start=1):
                     try:
                         results.append(f"{item['title']}: {enrich_one(item['id'], item['title'])}")
                     except Exception as exc:
                         results.append(f"{item['title']}: {exc}")
-                    progress.progress(number / len(to_update), text=f"Actualizando {number} de {len(to_update)}…")
+                    progress.progress(number / len(to_update), text=f"Updating {number} of {len(to_update)}...")
                 progress.empty()
                 cached_list_tags.clear()
 
-                st.success("Proceso terminado.")
-                with st.expander("Ver resultados detallados"):
+                st.success("Process complete.")
+                with st.expander("View detailed results"):
                     st.write("\n\n".join(results))
     with export_tab:
-        st.subheader("Exportaciones locales")
+        st.subheader("Local exports")
         rows = db.export_rows()
         frame = pd.DataFrame(rows)
-        st.download_button("Descargar CSV", frame.to_csv(index=False).encode("utf-8-sig"), "library_games.csv", "text/csv")
-        st.download_button("Descargar JSON", json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8"), "library_games.json", "application/json")
+        st.download_button("Download CSV", frame.to_csv(index=False).encode("utf-8-sig"), "library_games.csv", "text/csv")
+        st.download_button("Download JSON", json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8"), "library_games.json", "application/json")
         if db.DB_PATH.exists():
-            st.download_button("Descargar base SQLite", db.DB_PATH.read_bytes(), "game_library.db", "application/octet-stream")
+            st.download_button("Download SQLite database", db.DB_PATH.read_bytes(), "game_library.db", "application/octet-stream")
