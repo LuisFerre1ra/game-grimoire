@@ -14,7 +14,7 @@ def render_card(item: dict[str, Any], prefix: str, main_tags_names: set[str]) ->
         if cover:
             st.image(cover, width="stretch")
         else:
-            st.markdown('<div class="game-placeholder">Sin cover</div>', unsafe_allow_html=True)
+            st.markdown('<div class="game-placeholder">No cover</div>', unsafe_allow_html=True)
             st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
             
         special_tags = [t for t in item["tags"] if t in main_tags_names]
@@ -37,31 +37,31 @@ def render_card(item: dict[str, Any], prefix: str, main_tags_names: set[str]) ->
 def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     tags = cached_list_tags()
     with st.container(border=True):
-        row1_col1, row1_col2, row1_col3 = st.columns([2, 1, 1], vertical_alignment="bottom")
+        row1_col1, row1_col2, row1_col3 = st.columns([2, 1, 1], vertical_alignment="top")
         with row1_col1:
             query = st_keyup("Search by title", key=f"{key}_search")
-        wanted_tags = row1_col2.multiselect("Tags (incluir)", [tag["name"] for tag in tags], key=f"{key}_tags")
-        excluded_tags = row1_col3.multiselect("Tags (excluir)", [tag["name"] for tag in tags], key=f"{key}_tags_exc")
+        wanted_tags = row1_col2.multiselect("Tags (include)", [tag["name"] for tag in tags], key=f"{key}_tags")
+        excluded_tags = row1_col3.multiselect("Tags (exclude)", [tag["name"] for tag in tags], key=f"{key}_tags_exc")
         
-        row2_col1, row2_col2, row2_col3 = st.columns([2, 1, 1], vertical_alignment="bottom")
+        row2_col1, row2_col2, row2_col3 = st.columns([2, 1, 1], vertical_alignment="top")
         with row2_col1:
-            duration_category = st.radio("Duration", ["Todas", "Cortos (<10h)", "Medios (10-30h)", "Largos (+30h)"], horizontal=True, key=f"{key}_duration")
+            duration_category = st.radio("Duration", ["All", "Short (<10h)", "Medium (10-30h)", "Long (30h+)"], horizontal=True, key=f"{key}_duration")
         
-        only_ready = row2_col2.checkbox("Solo listos para jugar", key=f"{key}_ready", disabled=key != "backlog")
+        only_ready = row2_col2.checkbox("Ready to play only", key=f"{key}_ready", disabled=key != "backlog")
         include_unknown = row2_col3.checkbox("Include without duration", value=True, key=f"{key}_unknown")
 
-        sort_col, direction, view_col = st.columns([2, 1, 1], vertical_alignment="bottom")
-        sort_label = sort_col.selectbox("Sort by", ["Title", "Hours", "Date added", "Date de lanzamiento"], key=f"{key}_sort")
-        descending = direction.toggle("Descendente", key=f"{key}_descending")
+        sort_col, direction, view_col = st.columns([2, 1, 1], vertical_alignment="top")
+        sort_label = sort_col.selectbox("Sort by", ["Title", "Hours", "Date added", "Release date"], key=f"{key}_sort")
+        descending = direction.toggle("Descending", key=f"{key}_descending")
         view = view_col.radio("View", ["Cards", "Table"], horizontal=True, key=f"{key}_view")
 
     def match_duration(hours: float | None) -> bool:
-        if duration_category == "Todas": return True
+        if duration_category == "All": return True
         if hours is None: return True
         h = float(hours)
-        if duration_category == "Cortos (<10h)" and h < 10: return True
-        if duration_category == "Medios (10-30h)" and 10 <= h < 30: return True
-        if duration_category == "Largos (+30h)" and h >= 30: return True
+        if duration_category == "Short (<10h)" and h < 10: return True
+        if duration_category == "Medium (10-30h)" and 10 <= h < 30: return True
+        if duration_category == "Long (30h+)" and h >= 30: return True
         return False
 
     text = (query or "").strip().casefold()
@@ -74,7 +74,7 @@ def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any
         and (include_unknown or item["hours"] is not None)
         and match_duration(item["hours"])
     ]
-    fields = {"Title": "title", "Hours": "hours", "Date added": "added_at", "Date de lanzamiento": "release_date"}
+    fields = {"Title": "title", "Hours": "hours", "Date added": "added_at", "Release date": "release_date"}
     field = fields[sort_label]
     present = [item for item in filtered if item.get(field) is not None]
     missing = [item for item in filtered if item.get(field) is None]
@@ -83,7 +83,7 @@ def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any
     return present + missing
 
 def render_cards(items: list[dict[str, Any]], key: str) -> None:
-    page_size = st.select_slider("Games por página", options=[12, 24, 36, 48], value=24, key=f"{key}_page_size")
+    page_size = st.select_slider("Games per page", options=[12, 24, 36, 48], value=24, key=f"{key}_page_size")
     pages = max(1, (len(items) + page_size - 1) // page_size)
     
     page_state_key = f"{key}_page_state"
@@ -100,7 +100,7 @@ def render_cards(items: list[dict[str, Any]], key: str) -> None:
         if col1.button("<", key=f"{key}_prev_{suffix}", disabled=page <= 1, use_container_width=True):
             st.session_state[page_state_key] -= 1
             st.rerun()
-        col2.markdown(f"<div style='text-align: center; padding-top: 0.5rem;'><b>Página {page} de {pages}</b></div>", unsafe_allow_html=True)
+        col2.markdown(f"<div style='text-align: center; padding-top: 0.5rem;'><b>Page {page} of {pages}</b></div>", unsafe_allow_html=True)
         if col3.button(">", key=f"{key}_next_{suffix}", disabled=page >= pages, use_container_width=True):
             st.session_state[page_state_key] += 1
             st.rerun()
@@ -112,7 +112,7 @@ def render_cards(items: list[dict[str, Any]], key: str) -> None:
     main_tags_names = {t["name"] for t in all_tags if t.get("is_main")}
 
     current = items[(page - 1) * page_size : page * page_size]
-    st.caption(f"Mostrando {len(current)} de {len(items)} games")
+    st.caption(f"Showing {len(current)} of {len(items)} games")
     for start in range(0, len(current), 4):
         columns = st.columns(4)
         for column, item in zip(columns, current[start : start + 4]):
@@ -123,20 +123,20 @@ def render_cards(items: list[dict[str, Any]], key: str) -> None:
 
 def render_table(items: list[dict[str, Any]], key: str) -> None:
     rows = [{
-        "Title": item["title"], "Hours": item["hours"], "Ready": "Sí" if item["ready_to_play"] else "—",
-        "Tags": ", ".join(item["tags"]), "Lanzamiento": readable_date(item.get("release_date")),
-        "Added": readable_date(item.get("added_at")), "Años played": ", ".join(map(str, sorted(set(item["years"])))),
+        "Title": item["title"], "Hours": item["hours"], "Ready": "Yes" if item["ready_to_play"] else "—",
+        "Tags": ", ".join(item["tags"]), "Release": readable_date(item.get("release_date")),
+        "Added": readable_date(item.get("added_at")), "Years played": ", ".join(map(str, sorted(set(item["years"])))),
     } for item in items]
     event = st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row", key=f"{key}_table", column_config={"Hours": st.column_config.NumberColumn(format="%.1f h")})
     selected_rows = event.selection.rows if event and event.selection.rows else []
     if selected_rows:
         chosen = items[selected_rows[0]]
         left, right = st.columns([5, 1])
-        left.info(f"Seleccionado: **{chosen['title']}**")
+        left.info(f"Selected: **{chosen['title']}**")
         with right:
             game_actions(chosen, f"{key}_table_{chosen['id']}")
     else:
-        st.caption("Selecciona una fila para abrir sus acciones.")
+        st.caption("Select a row to open its actions.")
 
 def inventory_page(title: str, statuses: list[str], key: str) -> None:
     st.title(title)
@@ -149,16 +149,16 @@ def inventory_page(title: str, statuses: list[str], key: str) -> None:
 
         a, b, c = st.columns(3)
         a.metric("Games", len(items))
-        b.metric("Known hours", f"{known_sum:.1f} h")
-        c.metric("Predicted hours", "—" if predicted_total is None else f"{predicted_total:.1f} h")
+        b.metric("Known Hours", f"{known_sum:.1f} h")
+        c.metric("Estimated Hours", "—" if predicted_total is None else f"{predicted_total:.1f} h")
         if margin is not None:
             st.caption(f"80% estimate: ± {margin:.1f} h · {missing} without duration.")
     if not items:
-        st.info("Todavía no hay games aquí. Añade títulos desde «Add Games».")
+        st.info("No games here yet. Add titles from 'Add Games'.")
         return
     shown = filter_and_sort(items, key)
-    st.caption(f"{len(shown)} game(s) match filters.")
-    if st.session_state.get(f"{key}_active_view", "Tarjetas") == "Tarjetas":
+    st.caption(f"{len(shown)} game(s) match the filters.")
+    if st.session_state.get(f"{key}_active_view", "Cards") == "Cards":
         render_cards(shown, key)
     else:
         render_table(shown, key)

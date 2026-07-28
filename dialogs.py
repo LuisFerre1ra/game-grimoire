@@ -50,7 +50,7 @@ def edit_game_dialog(game_id: int) -> None:
         st.session_state.pop("dialog", None)
         st.rerun()
 
-@st.dialog("Cambiar status", on_dismiss=dismiss_dialog)
+@st.dialog("Change status", on_dismiss=dismiss_dialog)
 def status_dialog(game_id: int) -> None:
     item = db.get_game(game_id)
     if not item:
@@ -77,15 +77,15 @@ def delete_game_dialog(game_id: int) -> None:
         return
     st.warning(f"You are about to delete **{item['title']}** and all its history. This action cannot be undone.")
     left, right = st.columns(2)
-    if left.button("Delete definitivamente", type="primary"):
+    if left.button("Delete permanently", type="primary", use_container_width=True):
         db.delete_game(game_id)
         st.session_state.pop("dialog", None)
         st.rerun()
-    if right.button("Cancel"):
+    if right.button("Cancel", use_container_width=True):
         st.session_state.pop("dialog", None)
         st.rerun()
 
-@st.dialog("Limpiar details", on_dismiss=dismiss_dialog)
+@st.dialog("Clear details", on_dismiss=dismiss_dialog)
 def clear_metadata_dialog(game_id: int) -> None:
     item = db.get_game(game_id)
     if not item:
@@ -94,12 +94,12 @@ def clear_metadata_dialog(game_id: int) -> None:
         return
     st.warning(f"All downloaded details (cover, genres, etc.) will be deleted for **{item['title']}**. Are you sure?")
     left, right = st.columns(2)
-    if left.button("Limpiar details", type="primary"):
+    if left.button("Clear details", type="primary", use_container_width=True):
         db.clear_game_metadata(game_id)
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         st.rerun()
-    if right.button("Cancel"):
+    if right.button("Cancel", use_container_width=True):
         st.session_state.pop("dialog", None)
         st.rerun()
 
@@ -159,9 +159,9 @@ def metadata_dialog(game_id: int) -> None:
             pass
 
     a, b, c = st.columns(3)
-    a.metric("Lanzamiento", readable_date(item.get("release_date")))
+    a.metric("Release Date", readable_date(item.get("release_date")))
     b.metric("Duration", playtime)
-    c.metric("Valoración", rating_str)
+    c.metric("Rating", rating_str)
 
     try:
         dev_info = json.loads(item.get("developer_info_json") or "{}")
@@ -206,7 +206,7 @@ def metadata_dialog(game_id: int) -> None:
         
     st.write(f"**Description:** {description}")
     if item.get("cover_source_url"):
-        st.link_button("Abrir imagen de origen", item["cover_source_url"])
+        st.link_button("Open source image", item["cover_source_url"])
     if provider_data and provider_data.get("raw_payload_json"):
         with st.expander("Internal Archive"):
             try:
@@ -214,7 +214,7 @@ def metadata_dialog(game_id: int) -> None:
             except (json.JSONDecodeError, TypeError):
                 st.code(provider_data["raw_payload_json"], language="json")
 
-@st.dialog("Completar información", on_dismiss=dismiss_dialog)
+@st.dialog("Complete information", on_dismiss=dismiss_dialog)
 def enrich_game_dialog(game_id: int) -> None:
     from pages.add_games import enrich_one
     from providers import get_ordered_providers
@@ -235,20 +235,20 @@ def enrich_game_dialog(game_id: int) -> None:
     st.caption("Configured providers will be used in order.")
     
     left, right = st.columns(2)
-    if left.button("Update data", type="primary"):
-        with st.spinner("Buscando metadatos..."):
+    if left.button("Update data", type="primary", use_container_width=True):
+        with st.spinner("Searching metadata..."):
             try:
                 result = enrich_one(game_id, item['title'])
                 st.toast(result)
             except ProviderError as exc:
                 st.toast(f"Provider error: {exc}")
             except Exception as exc:
-                st.toast(f"Error inesperado: {exc}")
+                st.toast(f"Unexpected error: {exc}")
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         st.rerun()
         
-    if right.button("Cancel"):
+    if right.button("Cancel", use_container_width=True):
         st.session_state.pop("dialog", None)
         st.rerun()
 
@@ -260,7 +260,7 @@ def show_pending_dialog() -> None:
 def game_actions(item: dict[str, Any], prefix: str) -> None:
     col1, col2 = st.columns([4, 1])
         
-    enrich_label = "Reemplazar información" if item.get("metadata_source") or item.get("release_date") else "Completar información"
+    enrich_label = "Replace information" if item.get("metadata_source") or item.get("release_date") else "Complete information"
         
     with col1:
         st.button("Details", key=f"{prefix}_details", type="primary", use_container_width=True, on_click=queue_dialog, args=("metadata", item["id"]))
@@ -269,5 +269,5 @@ def game_actions(item: dict[str, Any], prefix: str) -> None:
         is_active_dialog = st.session_state.get("dialog") and st.session_state["dialog"]["game_id"] == item["id"]
         popover_key = f"{prefix}_popover_{'open' if is_active_dialog else 'closed'}"
         with st.popover("⋮", help="Actions", use_container_width=True, key=popover_key):
-            for kind, label in [("edit", "Edit"), ("status", "Change status"), ("enrich", enrich_label), ("clear_metadata", "Limpiar details"), ("delete", "Delete")]:
+            for kind, label in [("edit", "Edit"), ("status", "Change status"), ("enrich", enrich_label), ("clear_metadata", "Clear details"), ("delete", "Delete")]:
                 st.button(label, key=f"{prefix}_{kind}", type="tertiary", use_container_width=True, on_click=queue_dialog, args=(kind, item["id"]))

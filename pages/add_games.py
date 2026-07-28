@@ -31,9 +31,9 @@ def enrich_one(game_id: int, title: str) -> str:
             last_error = f"{provider.get_name()} error: {exc}"
             continue
         except Exception as exc:
-            last_error = f"{provider.get_name()} error inesperado: {exc}"
+            last_error = f"{provider.get_name()} unexpected error: {exc}"
             continue
-    return last_error or "No se encontraron coincidencias en ningún proveedor."
+    return last_error or "No matches found in any provider."
 
 def add_games_page() -> None:
     st.title("Add Games")
@@ -73,10 +73,10 @@ def add_games_page() -> None:
         created.append((game_id, title))
     messages: list[str] = []
     if enrich and created:
-        progress = st.progress(0, text="Buscando metadatos en proveedores…")
+        progress = st.progress(0, text="Searching metadata in providers...")
         for number, (game_id, title) in enumerate(created, start=1):
             messages.append(f"{title}: {enrich_one(game_id, title)}")
-            progress.progress(number / len(created), text=f"Enriqueciendo {number} de {len(created)}…")
+            progress.progress(number / len(created), text=f"Enriching {number} of {len(created)}...")
         progress.empty()
         cached_list_tags.clear()
 

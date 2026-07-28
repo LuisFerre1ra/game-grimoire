@@ -161,8 +161,6 @@ def init_database() -> None:
             [(name, category, color, is_main, stamp) for name, category, color, is_main in DEFAULT_TAGS],
         )
 
-    # Fix game_tags FK constraint if the DB was created with RESTRICT
-
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["ready_to_play"] = bool(item["ready_to_play"])
@@ -298,7 +296,7 @@ def lookup_aliases_by_names(raw_names: list[str]) -> list[dict[str, str]]:
 def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main: bool = False) -> None:
     clean_name = name.strip()
     if not clean_name:
-        raise ValueError("Tag requires a name.")
+        raise ValueError("Tag name cannot be empty.")
     try:
         with connection() as conn:
             conn.execute(
@@ -306,11 +304,11 @@ def add_tag(name: str, category: str = "Other", color: str = "#7E8996", is_main:
                 (clean_name, category.strip() or "Other", color, int(is_main), now_iso()),
             )
     except sqlite3.IntegrityError:
-        raise ValueError(f"A tag with the name already exists «{clean_name}».")
+        raise ValueError(f"A tag named '{clean_name}' already exists.")
 
 def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool = False, aliases: str = "") -> None:
     if not name.strip():
-        raise ValueError("Tag requires a name.")
+        raise ValueError("Tag name cannot be empty.")
     try:
         with connection() as conn:
             conn.execute(
@@ -322,7 +320,7 @@ def update_tag(tag_id: int, name: str, category: str, color: str, is_main: bool 
             for alias in set(alias_list):
                 conn.execute("INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)", (alias, tag_id))
     except sqlite3.IntegrityError:
-        raise ValueError(f"A tag with the name already exists «{name.strip()}».")
+        raise ValueError(f"A tag named '{name.strip()}' already exists.")
 
 def delete_tag(tag_id: int) -> None:
     with connection() as conn:
@@ -341,9 +339,9 @@ def create_game(
 ) -> int:
     clean_title = title.strip()
     if not clean_title:
-        raise ValueError("El título no puede estar vacío.")
+        raise ValueError("Title cannot be empty.")
     if status not in _VALID_STATUSES:
-        raise ValueError("Status no válido.")
+        raise ValueError("Invalid status.")
     if hours is not None and hours <= 0:
         raise ValueError("Hours must be greater than zero.")
     stamp = now_iso()
@@ -389,7 +387,7 @@ def update_game(
 ) -> None:
     clean_title = title.strip()
     if not clean_title:
-        raise ValueError("El título no puede estar vacío.")
+        raise ValueError("Title cannot be empty.")
     if hours is not None and hours <= 0:
         raise ValueError("Hours must be greater than zero.")
     with connection() as conn:
@@ -448,7 +446,7 @@ def change_status(
     game_id: int, status: str, played_year: int | None = None, notes: str | None = None
 ) -> None:
     if status not in _VALID_STATUSES:
-        raise ValueError("Status no válido.")
+        raise ValueError("Invalid status.")
     with connection() as conn:
         conn.execute(
             "UPDATE games SET status = ?, updated_at = ? WHERE id = ?",

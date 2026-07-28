@@ -53,7 +53,7 @@ class RAWGProvider(MetadataProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key.strip()
         if not self.api_key:
-            raise ProviderError("Please configure a RAWG API key before fetching metadata.")
+            raise ProviderError("Configure a RAWG API key first.")
 
     def get_name(self) -> str:
         return "RAWG"
@@ -67,7 +67,7 @@ class RAWGProvider(MetadataProvider):
         if response.status_code == 401:
             raise ProviderError("RAWG rejected the configured API key.")
         if response.status_code == 429:
-            raise ProviderError("RAWG reached rate limit. Please try again later.")
+            raise ProviderError("RAWG rate limit reached. Try again later.")
         try:
             response.raise_for_status()
         except requests.RequestException as exc:
@@ -148,11 +148,11 @@ def _get_igdb_token(client_id: str, client_secret: str) -> str:
         timeout=20,
     )
     if not resp.ok:
-        raise ProviderError("Could not obtain IGDB token with given credentials.")
+        raise ProviderError("Failed to obtain IGDB token with the provided credentials.")
     data = resp.json()
     token = data.get("access_token")
     if not token:
-        raise ProviderError("Respuesta de token IGDB inválida.")
+        raise ProviderError("Invalid IGDB token response.")
     expires_in = data.get("expires_in", 0)
     expires_at_dt = datetime.now(tz=UTC) + timedelta(seconds=expires_in)
     db.set_setting("igdb_access_token", token)
