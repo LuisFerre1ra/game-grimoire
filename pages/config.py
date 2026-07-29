@@ -44,13 +44,21 @@ def configuration_page() -> None:
             existing_cats = ["Genres", "Themes", "Game modes", "Age Rating", "Status", "Reviews", "Requirements", "Compatibility", "Other"]
         cat_options = existing_cats + ["+ New category..."]
         
-        if st.button("+ Add new tag", type="primary"):
-            try:
-                db.add_tag(f"New tag {int(time.time() * 1000) % 10000}", "Other", "#7E8996", False)
-                cached_list_tags.clear()
-                st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
+        top_left, _, top_right1, top_right2 = st.columns([1.5, 3.5, 1.8, 1.8])
+        with top_left:
+            if st.button("+ Add new tag", type="primary", use_container_width=True):
+                try:
+                    db.add_tag(f"New tag {int(time.time() * 1000) % 10000}", "Other", "#7E8996", False)
+                    cached_list_tags.clear()
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+        with top_right1:
+            if st.button("Restore missing", type="secondary", use_container_width=True, help="Restore missing default tags & aliases"):
+                queue_dialog("restore_missing_tags", 0)
+        with top_right2:
+            if st.button("Reset defaults", type="secondary", use_container_width=True, help="Reset default tags to factory settings"):
+                queue_dialog("reset_default_tags", 0)
                 
         all_tags = cached_list_tags()
         

@@ -122,6 +122,34 @@ def delete_tag_dialog(tag_id: int) -> None:
         st.session_state.pop("dialog", None)
         st.rerun()
 
+@st.dialog("Restore missing tags", on_dismiss=dismiss_dialog)
+def restore_missing_tags_dialog(_id: int = 0) -> None:
+    st.warning("Missing default tags and provider aliases will be restored to your catalogue. Custom tags and existing games will not be modified. Are you sure?")
+    left, right = st.columns(2)
+    if left.button("Restore tags", type="primary", use_container_width=True):
+        res = db.restore_default_tags(mode="missing")
+        cached_list_tags.clear()
+        st.session_state.pop("dialog", None)
+        st.toast(f"Restored {res['restored_tags']} missing tags and {res['restored_aliases']} aliases", icon=":material/restore:")
+        st.rerun()
+    if right.button("Cancel", use_container_width=True):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
+@st.dialog("Reset default tags", on_dismiss=dismiss_dialog)
+def reset_default_tags_dialog(_id: int = 0) -> None:
+    st.warning("All default tags will be reset to factory settings (original categories, colors, and aliases). Custom user tags will be preserved. Are you sure?")
+    left, right = st.columns(2)
+    if left.button("Reset defaults", type="primary", use_container_width=True):
+        res = db.restore_default_tags(mode="full_reset")
+        cached_list_tags.clear()
+        st.session_state.pop("dialog", None)
+        st.toast("Default tags reset to factory settings", icon=":material/refresh:")
+        st.rerun()
+    if right.button("Cancel", use_container_width=True):
+        st.session_state.pop("dialog", None)
+        st.rerun()
+
 @st.dialog("Game details", on_dismiss=dismiss_dialog, width="large")
 def metadata_dialog(game_id: int) -> None:
     item = db.get_game(game_id)
@@ -255,7 +283,20 @@ def enrich_game_dialog(game_id: int) -> None:
 def show_pending_dialog() -> None:
     active = st.session_state.get("dialog")
     if active:
-        {"edit": edit_game_dialog, "status": status_dialog, "delete": delete_game_dialog, "metadata": metadata_dialog, "enrich": enrich_game_dialog, "clear_metadata": clear_metadata_dialog, "delete_tag": delete_tag_dialog}[active["kind"]](active["game_id"])
+        dialogs_map = {
+            "edit": edit_game_dialog,
+            "status": status_dialog,
+            "delete": delete_game_dialog,
+            "metadata": metadata_dialog,
+            "enrich": enrich_game_dialog,
+            "clear_metadata": clear_metadata_dialog,
+            "delete_tag": delete_tag_dialog,
+            "restore_missing_tags": restore_missing_tags_dialog,
+            "reset_default_tags": reset_default_tags_dialog,
+        }
+        handler = dialogs_map.get(active["kind"])
+        if handler:
+            handler(active["game_id"])
 
 def game_actions(item: dict[str, Any], prefix: str) -> None:
     col1, col2 = st.columns([4, 1])
