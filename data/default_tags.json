@@ -1,0 +1,820 @@
+[
+  {
+    "name": "Adults Only +18 (AO)",
+    "category": "Age Rating",
+    "color": "#6A1B9A",
+    "is_custom": 0,
+    "is_main": 1,
+    "aliases": [
+      "18+",
+      "adults only",
+      "adults only 18+",
+      "ao",
+      "eighteen (18)",
+      "esrb: adults only",
+      "pegi 18"
+    ]
+  },
+  {
+    "name": "Everyone (E)",
+    "category": "Age Rating",
+    "color": "#1B5E20",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "3+",
+      "e",
+      "early childhood",
+      "ec",
+      "esrb: everyone",
+      "everyone",
+      "pegi 3",
+      "three (3)"
+    ]
+  },
+  {
+    "name": "Everyone 10+ (E10+)",
+    "category": "Age Rating",
+    "color": "#2E7D32",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "7+",
+      "e10",
+      "e10+",
+      "esrb: everyone 10+",
+      "everyone 10+",
+      "pegi 7",
+      "seven (7)"
+    ]
+  },
+  {
+    "name": "Mature +17 (M)",
+    "category": "Age Rating",
+    "color": "#C62828",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "16+",
+      "esrb: mature",
+      "m",
+      "mature",
+      "mature 17+",
+      "pegi 16",
+      "sixteen (16)"
+    ]
+  },
+  {
+    "name": "Rating Pending",
+    "category": "Age Rating",
+    "color": "#424242",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "esrb: rating pending",
+      "rating pending",
+      "rp"
+    ]
+  },
+  {
+    "name": "Teen (T)",
+    "category": "Age Rating",
+    "color": "#C66900",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "12+",
+      "esrb: teen",
+      "pegi 12",
+      "t",
+      "teen",
+      "twelve (12)"
+    ]
+  },
+  {
+    "name": "Battle Royale",
+    "category": "Game Modes",
+    "color": "#B71C1C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "battle royale"
+    ]
+  },
+  {
+    "name": "Co-op",
+    "category": "Game Modes",
+    "color": "#00695C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "co-op",
+      "co-op campaign",
+      "co-operative",
+      "online co-op",
+      "shared/split screen co-op"
+    ]
+  },
+  {
+    "name": "Local Multiplayer",
+    "category": "Game Modes",
+    "color": "#0277BD",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "4 player local",
+      "local",
+      "local co-op",
+      "local multiplayer",
+      "shared/split screen co-op",
+      "shared/split screen pvp",
+      "split screen"
+    ]
+  },
+  {
+    "name": "Massively Multiplayer (MMO)",
+    "category": "Game Modes",
+    "color": "#1565C0",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "massively multiplayer",
+      "massively multiplayer online (mmo)",
+      "mmo",
+      "mmorpg"
+    ]
+  },
+  {
+    "name": "Multiplayer",
+    "category": "Game Modes",
+    "color": "#4389D7",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "cross-platform multiplayer",
+      "multijugador",
+      "multiplayer",
+      "online multiplayer",
+      "online pvp",
+      "pvp"
+    ]
+  },
+  {
+    "name": "Singleplayer",
+    "category": "Game Modes",
+    "color": "#00695C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "single player",
+      "singleplayer"
+    ]
+  },
+  {
+    "name": "Adventure",
+    "category": "Genres",
+    "color": "#9A6000",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "adventure"
+    ]
+  },
+  {
+    "name": "Arcade",
+    "category": "Genres",
+    "color": "#B76E00",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "arcade"
+    ]
+  },
+  {
+    "name": "Card & Board Games",
+    "category": "Genres",
+    "color": "#8D6E63",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "board game",
+      "board games",
+      "card",
+      "card & board game",
+      "card game",
+      "trading card game"
+    ]
+  },
+  {
+    "name": "Fighting",
+    "category": "Genres",
+    "color": "#B71C1C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "fighting",
+      "martial arts"
+    ]
+  },
+  {
+    "name": "Hack and Slash / Beat 'em up",
+    "category": "Genres",
+    "color": "#880E4F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "beat 'em up",
+      "hack and slash",
+      "hack and slash/beat 'em up"
+    ]
+  },
+  {
+    "name": "Indie",
+    "category": "Genres",
+    "color": "#00695C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "indie"
+    ]
+  },
+  {
+    "name": "MOBA",
+    "category": "Genres",
+    "color": "#4A148C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "moba"
+    ]
+  },
+  {
+    "name": "Music & Rhythm",
+    "category": "Genres",
+    "color": "#880E4F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "music",
+      "rhythm"
+    ]
+  },
+  {
+    "name": "Pinball",
+    "category": "Genres",
+    "color": "#8D6E63",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "pinball"
+    ]
+  },
+  {
+    "name": "Platformer",
+    "category": "Genres",
+    "color": "#1B5E20",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "parkour",
+      "platform",
+      "platformer",
+      "precision platformer",
+      "puzzle platformer",
+      "puzzle-platformer"
+    ]
+  },
+  {
+    "name": "Point & Click",
+    "category": "Genres",
+    "color": "#1565C0",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "point & click",
+      "point-and-click"
+    ]
+  },
+  {
+    "name": "Puzzle / Logic",
+    "category": "Genres",
+    "color": "#6A1B9A",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "logic",
+      "programming",
+      "puzzle",
+      "puzzle platformer",
+      "puzzle-platformer"
+    ]
+  },
+  {
+    "name": "Racing & Driving",
+    "category": "Genres",
+    "color": "#B76E00",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "racing"
+    ]
+  },
+  {
+    "name": "Role-Playing (RPG)",
+    "category": "Genres",
+    "color": "#4A148C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "crpg",
+      "jrpg",
+      "mmorpg",
+      "party-based rpg",
+      "role playing game",
+      "role-playing (rpg)",
+      "rpg",
+      "strategy rpg",
+      "tactical rpg"
+    ]
+  },
+  {
+    "name": "Shooter",
+    "category": "Genres",
+    "color": "#B71C1C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "arena shooter",
+      "hero shooter",
+      "shooter",
+      "twin stick shooter"
+    ]
+  },
+  {
+    "name": "Simulation",
+    "category": "Genres",
+    "color": "#263238",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "immersive sim",
+      "simulation",
+      "simulator"
+    ]
+  },
+  {
+    "name": "Sports",
+    "category": "Genres",
+    "color": "#1B5E20",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "football",
+      "sport",
+      "sports"
+    ]
+  },
+  {
+    "name": "Strategy",
+    "category": "Genres",
+    "color": "#0D47A1",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "management",
+      "resource management",
+      "strategy",
+      "strategy rpg"
+    ]
+  },
+  {
+    "name": "Tactical",
+    "category": "Genres",
+    "color": "#1A237E",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "tactical",
+      "tactical rpg",
+      "tower defense",
+      "turn-based tactics"
+    ]
+  },
+  {
+    "name": "Trivia",
+    "category": "Genres",
+    "color": "#9A6000",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "quiz/trivia",
+      "trivia"
+    ]
+  },
+  {
+    "name": "Turn-Based Strategy (TBS)",
+    "category": "Genres",
+    "color": "#0D47A1",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "tbs",
+      "turn-based",
+      "turn-based combat",
+      "turn-based strategy",
+      "turn-based strategy (tbs)",
+      "turn-based tactics"
+    ]
+  },
+  {
+    "name": "Visual Novel",
+    "category": "Genres",
+    "color": "#AD1457",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "visual novel"
+    ]
+  },
+  {
+    "name": "Early Access",
+    "category": "Status",
+    "color": "#E0A84A",
+    "is_custom": 0,
+    "is_main": 1,
+    "aliases": [
+      "alpha",
+      "beta",
+      "early access"
+    ]
+  },
+  {
+    "name": "Incomplete Content",
+    "category": "Status",
+    "color": "#A8745A",
+    "is_custom": 0,
+    "is_main": 1,
+    "aliases": [
+      "demo",
+      "in development",
+      "prototype",
+      "unfinished",
+      "wip",
+      "work in progress"
+    ]
+  },
+  {
+    "name": "Unreleased",
+    "category": "Status",
+    "color": "#8C8C8C",
+    "is_custom": 0,
+    "is_main": 1,
+    "aliases": [
+      "cancelled",
+      "delisted",
+      "not released",
+      "offline",
+      "rumored",
+      "tba",
+      "unreleased"
+    ]
+  },
+  {
+    "name": "4X",
+    "category": "Themes",
+    "color": "#1A237E",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "4x",
+      "4x (explore",
+      "and exterminate)",
+      "expand",
+      "exploit"
+    ]
+  },
+  {
+    "name": "Action",
+    "category": "Themes",
+    "color": "#B71C1C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "action",
+      "action roguelike",
+      "action rpg",
+      "action-adventure",
+      "souls-like"
+    ]
+  },
+  {
+    "name": "Base Building",
+    "category": "Themes",
+    "color": "#4A148C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "base building"
+    ]
+  },
+  {
+    "name": "Business & Economy",
+    "category": "Themes",
+    "color": "#0277BD",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "business",
+      "capitalism",
+      "economy"
+    ]
+  },
+  {
+    "name": "Comedy & Humor",
+    "category": "Themes",
+    "color": "#A04000",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "comedy",
+      "dark comedy",
+      "dark humor",
+      "parody",
+      "satire"
+    ]
+  },
+  {
+    "name": "Drama",
+    "category": "Themes",
+    "color": "#6A1B9A",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "drama"
+    ]
+  },
+  {
+    "name": "Dungeon Crawler",
+    "category": "Themes",
+    "color": "#37474F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "dungeon crawler"
+    ]
+  },
+  {
+    "name": "Educational",
+    "category": "Themes",
+    "color": "#1B5E20",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "education",
+      "educational"
+    ]
+  },
+  {
+    "name": "Family",
+    "category": "Themes",
+    "color": "#0277BD",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "family",
+      "family friendly",
+      "family sharing",
+      "kids"
+    ]
+  },
+  {
+    "name": "Fantasy",
+    "category": "Themes",
+    "color": "#4A148C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "dark fantasy",
+      "demons",
+      "fantasy",
+      "magic"
+    ]
+  },
+  {
+    "name": "Historical",
+    "category": "Themes",
+    "color": "#5D4037",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "alternate history",
+      "historical",
+      "medieval",
+      "mythology"
+    ]
+  },
+  {
+    "name": "Horror",
+    "category": "Themes",
+    "color": "#212121",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "horror",
+      "survival horror"
+    ]
+  },
+  {
+    "name": "Mature Content (+18)",
+    "category": "Themes",
+    "color": "#880E4F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "18+",
+      "erotic",
+      "gore",
+      "nsfw",
+      "nudity",
+      "sexual content"
+    ]
+  },
+  {
+    "name": "Metroidvania",
+    "category": "Themes",
+    "color": "#1565C0",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "metroidvania"
+    ]
+  },
+  {
+    "name": "Mystery & Investigation",
+    "category": "Themes",
+    "color": "#311B92",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "detective",
+      "mystery"
+    ]
+  },
+  {
+    "name": "Open World",
+    "category": "Themes",
+    "color": "#006064",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "exploration",
+      "open world"
+    ]
+  },
+  {
+    "name": "Party / Minigames",
+    "category": "Themes",
+    "color": "#AD1457",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "party"
+    ]
+  },
+  {
+    "name": "Real-Time Strategy (RTS)",
+    "category": "Themes",
+    "color": "#0D47A1",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "real time strategy (rts)",
+      "real time tactics",
+      "real-time",
+      "real-time with pause",
+      "rts"
+    ]
+  },
+  {
+    "name": "Realistic",
+    "category": "Themes",
+    "color": "#37474F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "non-fiction",
+      "realistic"
+    ]
+  },
+  {
+    "name": "Roguelike",
+    "category": "Themes",
+    "color": "#880E4F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "roguelike",
+      "roguelite"
+    ]
+  },
+  {
+    "name": "Romance",
+    "category": "Themes",
+    "color": "#880E4F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "dating sim",
+      "romance"
+    ]
+  },
+  {
+    "name": "Sandbox",
+    "category": "Themes",
+    "color": "#8D6E63",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "sandbox"
+    ]
+  },
+  {
+    "name": "Sci-Fi",
+    "category": "Themes",
+    "color": "#006064",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "aliens",
+      "cyberpunk",
+      "sci-fi",
+      "science fiction",
+      "space"
+    ]
+  },
+  {
+    "name": "Shoot 'em up",
+    "category": "Themes",
+    "color": "#B71C1C",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "bullet hell",
+      "shoot 'em up"
+    ]
+  },
+  {
+    "name": "Souls-like",
+    "category": "Themes",
+    "color": "#212121",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "souls-like"
+    ]
+  },
+  {
+    "name": "Stealth",
+    "category": "Themes",
+    "color": "#37474F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "stealth"
+    ]
+  },
+  {
+    "name": "Survival",
+    "category": "Themes",
+    "color": "#1B5E20",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "survival",
+      "survival horror"
+    ]
+  },
+  {
+    "name": "Suspense / Thriller",
+    "category": "Themes",
+    "color": "#880E4F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "thriller"
+    ]
+  },
+  {
+    "name": "War & Military",
+    "category": "Themes",
+    "color": "#37474F",
+    "is_custom": 0,
+    "is_main": 0,
+    "aliases": [
+      "cold war",
+      "military",
+      "tanks",
+      "warfare"
+    ]
+  }
+]
