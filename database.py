@@ -17,12 +17,16 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "game_library.db"
 
-DEFAULT_TAGS = [
-    ("Early Access", "Status", "#E0A84A", 1),
-    ("Multiplayer", "Mode", "#4389D7", 0),
-    ("Unreleased", "Status", "#8C8C8C", 1),
-    ("Incomplete Content", "Status", "#A8745A", 1),
-]
+DEFAULT_TAGS_FILE = DATA_DIR / "default_tags.json"
+
+def get_default_tags_data() -> list[dict[str, Any]]:
+    """Load default tag catalog."""
+    if DEFAULT_TAGS_FILE.exists():
+        try:
+            return json.loads(DEFAULT_TAGS_FILE.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.error("Failed to load default_tags.json: %s", exc)
+    return []
 
 _VALID_STATUSES = frozenset(s.value for s in GameStatus)
 
@@ -152,14 +156,11 @@ def init_database() -> None:
             """)
         except sqlite3.OperationalError:
             pass
-        stamp = now_iso()
-        conn.executemany(
-            """
-            INSERT OR IGNORE INTO tags(name, category, color, is_main, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [(name, category, color, is_main, stamp) for name, category, color, is_main in DEFAULT_TAGS],
-        )
+    with connection() as conn:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key = 'defaults_seeded'").fetchone()
+        if not row:
+            restore_default_tags(mode="missing")
+            conn.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('defaults_seeded', '1')")
 
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
@@ -326,6 +327,58 @@ def delete_tag(tag_id: int) -> None:
     with connection() as conn:
         conn.execute("DELETE FROM game_tags WHERE tag_id = ?", (tag_id,))
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+
+def restore_default_tags(mode: str = "missing") -> dict[str, int]:
+    """Restore default tags and aliases from data/default_tags.json.
+
+    mode = "missing": Re-inserts any missing default tags/aliases without overwriting modifications.
+    mode = "full_reset": Restores missing tags/aliases AND resets existing default tags back to factory defaults.
+    User custom tags (is_custom=1) are preserved in both modes.
+    """
+    default_data = get_default_tags_data()
+    if not default_data:
+        return {"restored_tags": 0, "restored_aliases": 0}
+
+    stamp = now_iso()
+    restored_tags = 0
+    restored_aliases = 0
+
+    with connection() as conn:
+        for tag_info in default_data:
+            name = tag_info["name"].strip()
+            category = tag_info.get("category", "Other").strip()
+            color = tag_info.get("color", "#7E8996").strip()
+            is_main = int(tag_info.get("is_main", 0))
+            is_custom = int(tag_info.get("is_custom", 0))
+            aliases = tag_info.get("aliases", [])
+
+            row = conn.execute("SELECT id, name, category, color, is_main, is_custom FROM tags WHERE LOWER(name) = LOWER(?)", (name,)).fetchone()
+            if row:
+                tag_id = row["id"]
+                if mode == "full_reset" and not row["is_custom"]:
+                    conn.execute(
+                        "UPDATE tags SET name = ?, category = ?, color = ?, is_main = ?, is_custom = 0 WHERE id = ?",
+                        (name, category, color, is_main, tag_id)
+                    )
+            else:
+                cur = conn.execute(
+                    "INSERT INTO tags(name, category, color, is_custom, is_main, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, category, color, is_custom, is_main, stamp)
+                )
+                tag_id = cur.lastrowid
+                restored_tags += 1
+
+            for alias in aliases:
+                alias_clean = alias.strip().lower()
+                if alias_clean:
+                    res = conn.execute(
+                        "INSERT OR IGNORE INTO tag_aliases(alias_name, tag_id) VALUES (?, ?)",
+                        (alias_clean, tag_id)
+                    )
+                    if res.rowcount > 0:
+                        restored_aliases += 1
+
+    return {"restored_tags": restored_tags, "restored_aliases": restored_aliases}
 
 # Games CRUD
 
@@ -676,18 +729,20 @@ def export_rows() -> list[dict[str, Any]]:
 
 # Cleanup utilities
 
-_DEFAULT_TAG_NAMES = frozenset(name for name, *_ in DEFAULT_TAGS)
+def get_default_tag_names() -> frozenset[str]:
+    return frozenset(t["name"] for t in get_default_tags_data())
 
 def cleanup_spurious_tags() -> int:
     """Delete non-custom tags that were created by the old buggy enrichment.
 
     A tag is considered spurious if:
       • is_custom = 0  (not user-created)
-      • its name is NOT in DEFAULT_TAGS  (not a seeded tag)
+      • its name is NOT in default_tags.json  (not a seeded tag)
       • it has NO aliases in tag_aliases  (not part of the curated taxonomy)
 
     Returns the number of tags deleted.
     """
+    default_tag_names = get_default_tag_names()
     with connection() as conn:
         rows = conn.execute(
             """
@@ -699,7 +754,7 @@ def cleanup_spurious_tags() -> int:
             HAVING COUNT(a.id) = 0
             """
         ).fetchall()
-        spurious = [r for r in rows if r["name"] not in _DEFAULT_TAG_NAMES]
+        spurious = [r for r in rows if r["name"] not in default_tag_names]
         if not spurious:
             return 0
         ids = [r["id"] for r in spurious]
