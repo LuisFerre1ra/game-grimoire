@@ -1,4 +1,4 @@
-"""Local game library application."""
+"""Game Grimoire - Local game library application."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pages.inventory import inventory_page
 from pages.add_games import add_games_page
 from pages.config import configuration_page
 
-st.set_page_config(page_title="My Game Library", layout="wide")
+st.set_page_config(page_title="Game Grimoire", layout="wide")
 db.init_database()
 
 def main() -> None:
@@ -30,7 +30,7 @@ def main() -> None:
     page = st.session_state["page"]
     current_year = datetime.now().year
     with st.sidebar:
-        st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Library</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Game Grimoire</h2>", unsafe_allow_html=True)
         for item in nav_items:
             p = item["name"]
             icon = item["icon"]

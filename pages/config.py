@@ -165,7 +165,7 @@ def configuration_page() -> None:
         st.subheader("Local exports")
         rows = db.export_rows()
         frame = pd.DataFrame(rows)
-        st.download_button("Download CSV", frame.to_csv(index=False).encode("utf-8-sig"), "library_games.csv", "text/csv")
-        st.download_button("Download JSON", json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8"), "library_games.json", "application/json")
+        st.download_button("Download CSV", frame.to_csv(index=False).encode("utf-8-sig"), "game_grimoire_export.csv", "text/csv")
+        st.download_button("Download JSON", json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8"), "game_grimoire_export.json", "application/json")
         if db.DB_PATH.exists():
-            st.download_button("Download SQLite database", db.DB_PATH.read_bytes(), "game_library.db", "application/octet-stream")
+            st.download_button("Download SQLite database", db.DB_PATH.read_bytes(), "game_grimoire_backup.db", "application/octet-stream")
