@@ -223,7 +223,8 @@ class IGDBProvider(MetadataProvider):
         return "IGDB"
 
     def search(self, query: str) -> list[UnifiedGameData]:
-        q = f'search "{query}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 10;'
+        safe_query = query.replace('"', '\\"')
+        q = f'search "{safe_query}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 10;'
         try:
             response = self._request(self.base_url, q, timeout=20)
         except requests.RequestException as exc:
@@ -237,7 +238,8 @@ class IGDBProvider(MetadataProvider):
         if provider_game_id.isdigit():
             q = f'where id = {provider_game_id}; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 1;'
         else:
-            q = f'where slug = "{provider_game_id}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 1;'
+            safe_id = provider_game_id.replace('"', '\\"')
+            q = f'where slug = "{safe_id}"; fields name, slug, cover.url, first_release_date, genres.name, themes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, rating, summary, game_modes.name, multiplayer_modes.*, status; limit 1;'
             
         try:
             response = self._request(self.base_url, q, timeout=20)
