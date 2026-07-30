@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 import unicodedata
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from interfaces import GameStatus, UnifiedGameData
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
