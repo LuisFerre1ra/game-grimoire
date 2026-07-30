@@ -1,4 +1,4 @@
-"""SQLite persistence for the local game library."""
+"""SQLite storage layer."""
 
 from __future__ import annotations
 
