@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import streamlit as st
 
 import database as db
@@ -28,7 +26,6 @@ def main() -> None:
         st.session_state["page"] = "Backlog"
         
     page = st.session_state["page"]
-    current_year = datetime.now().year
     with st.sidebar:
         st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Game Grimoire</h2>", unsafe_allow_html=True)
         for item in nav_items:
