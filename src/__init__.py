@@ -1,0 +1,1 @@
+"""Game Grimoire package initialization."""
