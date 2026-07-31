@@ -33,5 +33,5 @@ jobs:
       - name: Streamlit App Action Smoke Test
         uses: streamlit/streamlit-app-action@v0.0.3
         with:
-          app-path: app.py
+          app-path: src/app.py
           ruff: true

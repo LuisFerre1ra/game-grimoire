@@ -1,7 +1,12 @@
 """Unit tests for metadata providers and query escaping."""
 
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# Add project src/ directory to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from providers import RAWGProvider, IGDBProvider, ProviderError, map_raw_tags
 
