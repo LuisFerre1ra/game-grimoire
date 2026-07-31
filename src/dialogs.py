@@ -307,7 +307,7 @@ def game_actions(item: dict[str, Any], prefix: str) -> None:
         st.button("Details", key=f"{prefix}_details", type="primary", use_container_width=True, on_click=queue_dialog, args=("metadata", item["id"]))
 
     with col2:
-        is_active_dialog = st.session_state.get("dialog") and st.session_state["dialog"]["game_id"] == item["id"]
+        is_active_dialog = bool(st.session_state.get("dialog") and st.session_state["dialog"].get("game_id") == item["id"])
         popover_key = f"{prefix}_popover_{'open' if is_active_dialog else 'closed'}"
         with st.popover("⋮", help="Actions", use_container_width=True, key=popover_key):
             for kind, label in [("edit", "Edit"), ("status", "Change status"), ("enrich", enrich_label), ("clear_metadata", "Clear details"), ("delete", "Delete")]:

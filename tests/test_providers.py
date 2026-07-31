@@ -54,5 +54,36 @@ class TestProviders(unittest.TestCase):
         posted_data = call_args.kwargs.get("data") or call_args[1].get("data")
         self.assertIn(r'Super \"Mario\" Bros', posted_data)
 
+    def test_igdb_null_fields_safety(self):
+        """Test that IGDB provider handles null values for optional fields without crashing."""
+        provider = IGDBProvider.__new__(IGDBProvider)
+        null_data = {
+            "id": 123,
+            "name": "Test Game",
+            "cover": None,
+            "involved_companies": None,
+            "genres": None,
+            "themes": None,
+            "game_modes": None,
+            "multiplayer_modes": None,
+            "status": None
+        }
+        unified = provider._map_to_unified(null_data)
+        self.assertEqual(unified.name, "Test Game")
+        self.assertIsNone(unified.cover_url)
+        self.assertEqual(unified.developers, [])
+        self.assertEqual(unified.genres, [])
+
+    def test_rawg_zero_playtime_maps_to_none(self):
+        """Test that RAWG provider converts playtime of 0 to None."""
+        provider = RAWGProvider.__new__(RAWGProvider)
+        raw_data = {
+            "id": 456,
+            "name": "Zero Playtime Game",
+            "playtime": 0
+        }
+        unified = provider._map_to_unified(raw_data)
+        self.assertIsNone(unified.playtime_hours)
+
 if __name__ == "__main__":
     unittest.main()
