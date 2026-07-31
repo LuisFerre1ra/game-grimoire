@@ -36,12 +36,21 @@ def map_raw_tags(raw_tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
 
     found_aliases = {}
     for r in rows:
-        found_aliases[r["alias_name"]] = (r["name"], r["category"])
+        found_aliases[r["alias_name"].lower()] = (r["name"], r["category"])
         
+    all_tags = db.cached_list_tags()
+    tag_by_lower_name = {t["name"].lower(): (t["name"], t["category"]) for t in all_tags}
+
     for raw in raw_tags:
-        lower_raw = raw.lower()
+        if not raw or not raw.strip():
+            continue
+        lower_raw = raw.strip().lower()
         if lower_raw in found_aliases:
             name, cat = found_aliases[lower_raw]
+            if cat in mapped and name not in mapped[cat]:
+                mapped[cat].append(name)
+        elif lower_raw in tag_by_lower_name:
+            name, cat = tag_by_lower_name[lower_raw]
             if cat in mapped and name not in mapped[cat]:
                 mapped[cat].append(name)
         else:
@@ -91,19 +100,23 @@ class RAWGProvider(MetadataProvider):
         return self._map_to_unified(raw_data), raw_data
 
     def _map_to_unified(self, data: dict[str, Any]) -> UnifiedGameData:
-        devs = [d.get("name") for d in data.get("developers", []) if d.get("name")]
-        pubs = [p.get("name") for p in data.get("publishers", []) if p.get("name")]
+        devs = [d.get("name") for d in (data.get("developers") or []) if isinstance(d, dict) and d.get("name")]
+        pubs = [p.get("name") for p in (data.get("publishers") or []) if isinstance(p, dict) and p.get("name")]
         age_ratings = []
-        if data.get("esrb_rating") and data["esrb_rating"].get("name"):
-            age_ratings.append(f"ESRB: {data['esrb_rating']['name']}")
+        esrb = data.get("esrb_rating")
+        if isinstance(esrb, dict) and esrb.get("name"):
+            age_ratings.append(f"ESRB: {esrb['name']}")
             
         raw_tags = []
-        if data.get("esrb_rating") and data["esrb_rating"].get("name"):
-            raw_tags.append(data["esrb_rating"]["name"])
-        raw_tags.extend([g.get("name") for g in data.get("genres", []) if g.get("name")])
-        raw_tags.extend([t.get("name") for t in data.get("tags", []) if t.get("name")])
+        if isinstance(esrb, dict) and esrb.get("name"):
+            raw_tags.append(esrb["name"])
+        raw_tags.extend([g.get("name") for g in (data.get("genres") or []) if isinstance(g, dict) and g.get("name")])
+        raw_tags.extend([t.get("name") for t in (data.get("tags") or []) if isinstance(t, dict) and t.get("name")])
         mapped, unmapped = map_raw_tags(raw_tags)
         
+        playtime = data.get("playtime")
+        playtime_hours = float(playtime) if (playtime is not None and float(playtime) > 0) else None
+
         return UnifiedGameData(
             provider_id=str(data.get("id", data.get("slug"))),
             name=data.get("name", ""),
@@ -111,7 +124,7 @@ class RAWGProvider(MetadataProvider):
             first_release_date=data.get("released"),
             cover_url=data.get("background_image"),
             total_rating=data.get("metacritic") or data.get("rating"),
-            playtime_hours=data.get("playtime"),
+            playtime_hours=playtime_hours,
             age_ratings=mapped.get("Age Rating") or age_ratings,
             genres=mapped.get("Genres", []),
             themes=mapped.get("Themes", []),
@@ -256,15 +269,18 @@ class IGDBProvider(MetadataProvider):
     def _map_to_unified(self, data: dict[str, Any]) -> UnifiedGameData:
         devs = []
         pubs = []
-        for inv in data.get("involved_companies", []):
-            comp = inv.get("company", {}).get("name")
-            if comp:
-                if inv.get("developer"): devs.append(comp)
-                if inv.get("publisher"): pubs.append(comp)
+        for inv in (data.get("involved_companies") or []):
+            if isinstance(inv, dict):
+                comp_info = inv.get("company")
+                comp = comp_info.get("name") if isinstance(comp_info, dict) else None
+                if comp:
+                    if inv.get("developer"): devs.append(comp)
+                    if inv.get("publisher"): pubs.append(comp)
 
         cover_url = None
-        if "cover" in data and "url" in data["cover"]:
-            cover_url = data["cover"]["url"].replace("t_thumb", "t_1080p")
+        cover_data = data.get("cover")
+        if isinstance(cover_data, dict) and cover_data.get("url"):
+            cover_url = cover_data["url"].replace("t_thumb", "t_1080p")
             if not cover_url.startswith("http"):
                 cover_url = "https:" + cover_url
 
@@ -281,15 +297,16 @@ class IGDBProvider(MetadataProvider):
         game_status = status_map.get(data.get("status"))
 
         raw_tags = []
-        raw_tags.extend([g.get("name") for g in data.get("genres", []) if g.get("name")])
-        raw_tags.extend([t.get("name") for t in data.get("themes", []) if t.get("name")])
-        raw_tags.extend([m.get("name") for m in data.get("game_modes", []) if m.get("name")])
+        raw_tags.extend([g.get("name") for g in (data.get("genres") or []) if isinstance(g, dict) and g.get("name")])
+        raw_tags.extend([t.get("name") for t in (data.get("themes") or []) if isinstance(t, dict) and t.get("name")])
+        raw_tags.extend([m.get("name") for m in (data.get("game_modes") or []) if isinstance(m, dict) and m.get("name")])
         
-        for mp in data.get("multiplayer_modes", []):
-            if mp.get("campaigncoop"): raw_tags.append("Campaign Co-op")
-            if mp.get("lancoop"): raw_tags.append("LAN Co-op")
-            if mp.get("offlinecoop"): raw_tags.append("Offline Co-op")
-            if mp.get("onlinecoop"): raw_tags.append("Online Co-op")
+        for mp in (data.get("multiplayer_modes") or []):
+            if isinstance(mp, dict):
+                if mp.get("campaigncoop"): raw_tags.append("Campaign Co-op")
+                if mp.get("lancoop"): raw_tags.append("LAN Co-op")
+                if mp.get("offlinecoop"): raw_tags.append("Offline Co-op")
+                if mp.get("onlinecoop"): raw_tags.append("Online Co-op")
         if game_status:
             raw_tags.append(game_status)
 

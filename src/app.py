@@ -37,7 +37,6 @@ def main() -> None:
 
     if page == "Backlog": inventory_page("Backlog", ["backlog"], "backlog")
     elif page == "Played": inventory_page("Played & Abandoned", ["played", "abandoned"], "played")
-    elif page ==: statistics_page()
     elif page == "Add Games": add_games_page()
     elif page == "Settings": configuration_page()
     show_pending_dialog()

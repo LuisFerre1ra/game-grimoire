@@ -140,5 +140,18 @@ class TestDatabase(unittest.TestCase):
             db.set_schema_version(conn, 2)
         self.assertEqual(db.get_schema_version(), 2)
 
+    def test_update_game_metadata_zero_hours_safety(self):
+        """Test that update_game_metadata with playtime_hours=0 does not violate CHECK constraint."""
+        from interfaces import UnifiedGameData
+        game_id = db.create_game(title="Hades")
+        unified = UnifiedGameData(
+            provider_id="123",
+            name="Hades",
+            playtime_hours=0.0
+        )
+        db.update_game_metadata(game_id, unified, "{}", "RAWG", None)
+        game = db.get_game(game_id)
+        self.assertIsNone(game["hours"])
+
 if __name__ == "__main__":
     unittest.main()

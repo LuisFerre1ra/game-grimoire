@@ -12,6 +12,7 @@ import unicodedata
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+import threading
 from typing import Any, Iterator, Sequence
 
 from interfaces import GameStatus, UnifiedGameData
@@ -56,18 +57,40 @@ def normalize_title(value: str) -> str:
     without_accents = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]+", " ", without_accents.lower()).strip()
 
+_local = threading.local()
 _conn: sqlite3.Connection | None = None
 
 def _get_connection() -> sqlite3.Connection:
-    """Return a long-lived module-level connection (created once, reused)."""
+    """Get thread-local SQLite connection."""
     global _conn
-    if _conn is None:
-        DATA_DIR.mkdir(exist_ok=True)
-        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA foreign_keys = ON")
-        _conn.execute("PRAGMA journal_mode = WAL")
-    return _conn
+    if _conn is not None:
+        return _conn
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        _local.conn = conn
+    return conn
+
+def close_connection() -> None:
+    """Close thread-local database connection."""
+    global _conn
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _local.conn = None
+    if _conn is not None:
+        try:
+            _conn.close()
+        except Exception:
+            pass
+        _conn = None
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
@@ -573,6 +596,8 @@ def update_game_metadata(
         raw_tag_names.append(unified.game_status)
     tag_ids = resolve_tags_via_aliases(raw_tag_names)
 
+    hours_val = unified.playtime_hours if (unified.playtime_hours is not None and unified.playtime_hours > 0) else None
+
     stamp = now_iso()
     with connection() as conn:
         conn.execute(
@@ -592,7 +617,7 @@ def update_game_metadata(
                 unified.first_release_date,
                 local_cover_path,
                 unified.cover_url,
-                unified.playtime_hours,
+                hours_val,
                 json.dumps({"developers": unified.developers, "publishers": unified.publishers}, ensure_ascii=False),
                 provider_name,
                 stamp,
