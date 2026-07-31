@@ -3,7 +3,11 @@
 import unittest
 import shutil
 import tempfile
+import sys
 from pathlib import Path
+
+# Add project src/ directory to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import database as db
 from interfaces import GameStatus
