@@ -1,6 +1,7 @@
 from __future__ import annotations
 import html as html_mod
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Iterable
 import streamlit as st
 import database as db
@@ -122,10 +123,18 @@ def format_hours(value: float | None) -> str:
     return f"{value:.1f} h" if value is not None else "No duration"
 
 def cover_reference(item: dict[str, Any]) -> str | None:
-    if item.get("cover_local_path"):
-        candidate = db.BASE_DIR / item["cover_local_path"]
-        if candidate.exists():
-            return str(candidate)
+    path_str = item.get("cover_local_path")
+    if path_str:
+        # Check in AppData covers directory (%APPDATA%\GameGrimoire\covers\<filename>)
+        filename = Path(path_str).name
+        candidate_appdata = db.DATA_DIR / "covers" / filename
+        if candidate_appdata.exists():
+            return str(candidate_appdata)
+
+        # Fallback: check relative to BASE_DIR if legacy path
+        candidate_base = db.BASE_DIR / path_str
+        if candidate_base.exists():
+            return str(candidate_base)
     return item.get("cover_source_url")
 
 def tag_html(tags: Iterable[str], limit: int = 4, show_empty: bool = True) -> str:

@@ -133,5 +133,12 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(db.get_setting("non_existent_key"), "")
         self.assertIsNone(db.get_setting("non_existent_key", default=None))
 
+    def test_schema_version(self):
+        """Test reading and setting database schema version."""
+        self.assertEqual(db.get_schema_version(), 1)
+        with db.connection() as conn:
+            db.set_schema_version(conn, 2)
+        self.assertEqual(db.get_schema_version(), 2)
+
 if __name__ == "__main__":
     unittest.main()
