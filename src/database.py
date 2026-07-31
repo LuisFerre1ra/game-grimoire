@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
+import sys
 import unicodedata
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -16,11 +18,23 @@ from interfaces import GameStatus, UnifiedGameData
 
 logger = logging.getLogger(__name__)
 
+def get_user_data_dir() -> Path:
+    """Get OS user data directory."""
+    if sys.platform == "win32":
+        base = Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path.home() / ".local" / "share"
+
+    app_data = base / "GameGrimoire"
+    return app_data
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = get_user_data_dir()
 DB_PATH = DATA_DIR / "game_library.db"
 
-DEFAULT_TAGS_FILE = DATA_DIR / "default_tags.json"
+DEFAULT_TAGS_FILE = BASE_DIR / "data" / "default_tags.json"
 
 def get_default_tags_data() -> list[dict[str, Any]]:
     """Load default tag catalog."""
@@ -160,6 +174,28 @@ def init_database() -> None:
         except sqlite3.OperationalError:
             pass
     restore_default_tags(mode="missing")
+
+def get_schema_version(conn: sqlite3.Connection | None = None) -> int:
+    """Return current integer schema_version stored in schema_meta (defaults to 1)."""
+    close_conn = False
+    if conn is None:
+        conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        if row:
+            return int(row[0])
+    except Exception as exc:
+        logger.debug("Failed to query schema_version: %s", exc)
+    return 1
+
+def set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Persist schema_version to schema_meta."""
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
+        (str(version),),
+    )
 
 def _row_to_game(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
