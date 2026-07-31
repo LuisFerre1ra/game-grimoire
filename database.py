@@ -465,17 +465,6 @@ def update_game(
         )
         _set_game_tags(conn, game_id, tag_ids)
 
-def set_game_hours(game_id: int, hours: float | None) -> None:
-    """Set (or clear) the playtime hours for a game."""
-    if hours is not None and hours <= 0:
-        raise ValueError("Hours must be greater than zero.")
-    with connection() as conn:
-        conn.execute("UPDATE games SET hours = ?, updated_at = ? WHERE id = ?", (hours, now_iso(), game_id))
-
-def clear_selected_estimate(game_id: int) -> None:
-    with connection() as conn:
-        conn.execute("UPDATE games SET hours = NULL, updated_at = ? WHERE id = ?", (now_iso(), game_id))
-
 def add_play_event(
     game_id: int,
     outcome: str,
@@ -690,99 +679,9 @@ def estimate_total_hours(
     margin = 1.28 * std_dev * (unknown_count + (unknown_count ** 2 / known_count)) ** 0.5
     return predicted, margin
 
-def dashboard_metrics() -> dict[str, Any]:
-    with connection() as conn:
-        counts = conn.execute(
-            """
-            SELECT
-                SUM(CASE WHEN status = 'backlog' THEN 1 ELSE 0 END) AS backlog,
-                SUM(CASE WHEN status = 'backlog' AND ready_to_play = 1 THEN 1 ELSE 0 END) AS ready,
-                SUM(CASE WHEN status = 'played' THEN 1 ELSE 0 END) AS played,
-                SUM(CASE WHEN status = 'abandoned' THEN 1 ELSE 0 END) AS abandoned
-            FROM games
-            """
-        ).fetchone()
-        hours_rows = conn.execute(
-            "SELECT hours FROM games WHERE status = 'backlog' AND hours IS NOT NULL"
-        ).fetchall()
-
-    backlog_count = counts["backlog"] or 0
-    known_hours = [r[0] for r in hours_rows]
-    known_sum = sum(known_hours) if known_hours else 0
-    missing = backlog_count - len(known_hours)
-    predicted_total, margin = estimate_total_hours(known_hours, missing)
-
-    return {
-        "backlog": backlog_count,
-        "ready": counts["ready"] or 0,
-        "played": counts["played"] or 0,
-        "abandoned": counts["abandoned"] or 0,
-        "known_hours": known_sum,
-        "unknown_hours": missing,
-        "predicted_hours": predicted_total,
-        "margin_hours": margin,
-    }
-
 def export_rows() -> list[dict[str, Any]]:
     rows = list_games()
     for row in rows:
         row["tags"] = ", ".join(row["tags"])
         row["years"] = ", ".join(str(year) for year in sorted(set(row["years"])))
     return rows
-
-# Cleanup utilities
-
-def get_default_tag_names() -> frozenset[str]:
-    return frozenset(t["name"] for t in get_default_tags_data())
-
-def cleanup_spurious_tags() -> int:
-    """Delete non-custom tags that were created by the old buggy enrichment.
-
-    A tag is considered spurious if:
-      • is_custom = 0  (not user-created)
-      • its name is NOT in default_tags.json  (not a seeded tag)
-      • it has NO aliases in tag_aliases  (not part of the curated taxonomy)
-
-    Returns the number of tags deleted.
-    """
-    default_tag_names = get_default_tag_names()
-    with connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT t.id, t.name
-            FROM tags t
-            LEFT JOIN tag_aliases a ON a.tag_id = t.id
-            WHERE t.is_custom = 0
-            GROUP BY t.id
-            HAVING COUNT(a.id) = 0
-            """
-        ).fetchall()
-        spurious = [r for r in rows if r["name"] not in default_tag_names]
-        if not spurious:
-            return 0
-        ids = [r["id"] for r in spurious]
-        placeholders = ",".join("?" for _ in ids)
-        conn.execute(f"DELETE FROM game_tags WHERE tag_id IN ({placeholders})", ids)
-        conn.execute(f"DELETE FROM tags WHERE id IN ({placeholders})", ids)
-    return len(spurious)
-
-def cleanup_orphan_covers() -> int:
-    """Delete cover image files not referenced by any game.  Returns count deleted."""
-    covers_dir = DATA_DIR / "covers"
-    if not covers_dir.exists():
-        return 0
-    with connection() as conn:
-        rows = conn.execute(
-            "SELECT cover_local_path FROM games WHERE cover_local_path IS NOT NULL"
-        ).fetchall()
-    referenced = set()
-    for r in rows:
-        path = r["cover_local_path"]
-        if path:
-            referenced.add(Path(path).name)
-    deleted = 0
-    for f in covers_dir.iterdir():
-        if f.is_file() and f.name not in referenced:
-            f.unlink()
-            deleted += 1
-    return deleted
