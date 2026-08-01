@@ -80,7 +80,8 @@ def add_games_page() -> None:
         progress.empty()
         cached_list_tags.clear()
 
-    st.success(f"Added {len(created)} game(s).")
+    if created:
+        st.toast(f"Added {len(created)} game(s)", icon=":material/check_circle:")
     if skipped:
         st.info(f"Skipped duplicates: {', '.join(skipped)}")
     if messages:

@@ -16,6 +16,25 @@ def cached_list_tags() -> list[dict[str, Any]]:
 def clear_tags_cache() -> None:
     cached_list_tags.clear()
 
+def queue_toast(message: str, icon: str = "") -> None:
+    """Store a toast in session_state so it fires AFTER the next st.rerun().
+
+    Call this instead of st.toast() whenever a st.rerun() follows immediately.
+    The deferred toast is shown at the very start of the next render by
+    show_queued_toasts(), before any rerun can clobber it.
+    """
+    if "pending_toasts" not in st.session_state:
+        st.session_state["pending_toasts"] = []
+    st.session_state["pending_toasts"].append({"message": message, "icon": icon})
+
+def show_queued_toasts() -> None:
+    """Display any toasts queued by queue_toast(). Call once at app startup."""
+    for toast in st.session_state.pop("pending_toasts", []):
+        if toast.get("icon"):
+            st.toast(toast["message"], icon=toast["icon"])
+        else:
+            st.toast(toast["message"])
+
 def inject_styles() -> None:
     st.markdown(
         """
@@ -105,6 +124,94 @@ def inject_styles() -> None:
               background-color: #ef4444 !important;
               color: #ffffff !important;
               border: 1px solid #ef4444 !important;
+          }
+
+          /* ── Toast Notifications ─────────────────────────────────────────── */
+
+          @keyframes toast-slide-in {
+            0%   { transform: translateX(120%); opacity: 0; }
+            60%  { transform: translateX(-6px);  opacity: 1; }
+            80%  { transform: translateX(3px);   opacity: 1; }
+            100% { transform: translateX(0);     opacity: 1; }
+          }
+
+          @keyframes toast-glow-green {
+            0%   { box-shadow: 0 4px 24px rgba(34,197,94,0.0),  0 2px 8px rgba(0,0,0,0.5); }
+            40%  { box-shadow: 0 4px 32px rgba(34,197,94,0.55), 0 2px 8px rgba(0,0,0,0.5); }
+            100% { box-shadow: 0 4px 16px rgba(34,197,94,0.2),  0 2px 8px rgba(0,0,0,0.4); }
+          }
+
+          @keyframes toast-glow-amber {
+            0%   { box-shadow: 0 4px 24px rgba(251,191,36,0.0),  0 2px 8px rgba(0,0,0,0.5); }
+            40%  { box-shadow: 0 4px 32px rgba(251,191,36,0.55), 0 2px 8px rgba(0,0,0,0.5); }
+            100% { box-shadow: 0 4px 16px rgba(251,191,36,0.2),  0 2px 8px rgba(0,0,0,0.4); }
+          }
+
+          @keyframes toast-glow-red {
+            0%   { box-shadow: 0 4px 24px rgba(239,68,68,0.0),  0 2px 8px rgba(0,0,0,0.5); }
+            40%  { box-shadow: 0 4px 32px rgba(239,68,68,0.55), 0 2px 8px rgba(0,0,0,0.5); }
+            100% { box-shadow: 0 4px 16px rgba(239,68,68,0.2),  0 2px 8px rgba(0,0,0,0.4); }
+          }
+
+          /* Base toast reset */
+          div[data-testid="stToast"] {
+            animation: toast-slide-in 0.45s cubic-bezier(0.22,1,0.36,1) forwards;
+            border-radius: 0.6rem !important;
+            border: 1px solid rgba(255,255,255,0.08) !important;
+            backdrop-filter: blur(12px) !important;
+            padding: 0.85rem 1.1rem !important;
+            min-width: 280px !important;
+            max-width: 380px !important;
+            font-size: 0.9rem !important;
+            font-weight: 500 !important;
+            color: #f0f6ff !important;
+          }
+
+          div[data-testid="stToast"] p {
+            color: #f0f6ff !important;
+            font-size: 0.9rem !important;
+            font-weight: 500 !important;
+            line-height: 1.4 !important;
+          }
+
+          /* ── Green toasts: check_circle, restore, cloud_done ── */
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"]) {
+            background: linear-gradient(135deg, #0f2a1a 0%, #14381f 100%) !important;
+            border-color: rgba(34,197,94,0.35) !important;
+            animation: toast-slide-in 0.45s cubic-bezier(0.22,1,0.36,1) forwards,
+                       toast-glow-green 1.2s 0.45s ease-out forwards !important;
+          }
+
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"]) [data-testid="stIconMaterial"] {
+            color: #4ade80 !important;
+          }
+
+          /* ── Amber toasts: refresh, delete ── */
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="refresh"]),
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="delete"]) {
+            background: linear-gradient(135deg, #251e08 0%, #352905 100%) !important;
+            border-color: rgba(251,191,36,0.35) !important;
+            animation: toast-slide-in 0.45s cubic-bezier(0.22,1,0.36,1) forwards,
+                       toast-glow-amber 1.2s 0.45s ease-out forwards !important;
+          }
+
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="refresh"]) [data-testid="stIconMaterial"],
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="delete"]) [data-testid="stIconMaterial"] {
+            color: #fbbf24 !important;
+          }
+
+          /* ── Red toasts: error, cloud_off ── */
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="error"]),
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="cloud_off"]) {
+            background: linear-gradient(135deg, #200d0d 0%, #2e1010 100%) !important;
+            border-color: rgba(239,68,68,0.4) !important;
+            animation: toast-slide-in 0.45s cubic-bezier(0.22,1,0.36,1) forwards,
+                       toast-glow-red 1.2s 0.45s ease-out forwards !important;
+          }
+
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="error"]) [data-testid="stIconMaterial"],
+          div[data-testid="stToast"]:has([data-testid="stIconMaterial"][aria-label="cloud_off"]) [data-testid="stIconMaterial"] {
+            color: #f87171 !important;
           }
         </style>
         """,

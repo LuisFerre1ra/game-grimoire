@@ -7,7 +7,7 @@ from typing import Any
 import streamlit as st
 import database as db
 from providers import ProviderError, map_raw_tags
-from ui_helpers import cached_list_tags, STATUS_LABELS, readable_date, format_hours, cover_reference
+from ui_helpers import cached_list_tags, STATUS_LABELS, readable_date, format_hours, cover_reference, queue_toast
 
 def queue_dialog(kind: str, game_id: int) -> None:
     st.session_state["dialog"] = {"kind": kind, "game_id": game_id}
@@ -47,6 +47,7 @@ def edit_game_dialog(game_id: int) -> None:
         except (ValueError, sqlite3.IntegrityError) as exc:
             st.error(f"Failed to save: {exc}")
             return
+        queue_toast(f"'{title}' saved", icon=":material/check_circle:")
         st.session_state.pop("dialog", None)
         st.rerun()
 
@@ -65,6 +66,7 @@ def status_dialog(game_id: int) -> None:
         event_notes = st.text_area("Session Notes (optional)", height=80)
     if st.button("Save Status", type="primary"):
         db.change_status(game_id, status, year, event_notes)
+        queue_toast(f"Status updated to {STATUS_LABELS[status]}", icon=":material/check_circle:")
         st.session_state.pop("dialog", None)
         st.rerun()
 
@@ -79,6 +81,7 @@ def delete_game_dialog(game_id: int) -> None:
     left, right = st.columns(2)
     if left.button("Delete permanently", type="primary", use_container_width=True):
         db.delete_game(game_id)
+        queue_toast(f"'{item['title']}' deleted", icon=":material/delete:")
         st.session_state.pop("dialog", None)
         st.rerun()
     if right.button("Cancel", use_container_width=True):
@@ -97,6 +100,7 @@ def clear_metadata_dialog(game_id: int) -> None:
     if left.button("Clear details", type="primary", use_container_width=True):
         db.clear_game_metadata(game_id)
         cached_list_tags.clear()
+        queue_toast(f"Details cleared for '{item['title']}'", icon=":material/delete:")
         st.session_state.pop("dialog", None)
         st.rerun()
     if right.button("Cancel", use_container_width=True):
@@ -116,6 +120,7 @@ def delete_tag_dialog(tag_id: int) -> None:
     if left.button("Delete tag", type="primary", use_container_width=True):
         db.delete_tag(tag_id)
         cached_list_tags.clear()
+        queue_toast(f"Tag '{tag['name']}' deleted", icon=":material/delete:")
         st.session_state.pop("dialog", None)
         st.rerun()
     if right.button("Cancel", use_container_width=True):
@@ -130,7 +135,7 @@ def restore_missing_tags_dialog(_id: int = 0) -> None:
         res = db.restore_default_tags(mode="missing")
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)
-        st.toast(f"Restored {res['restored_tags']} missing tags and {res['restored_aliases']} aliases", icon=":material/restore:")
+        queue_toast(f"Restored {res['restored_tags']} missing tags and {res['restored_aliases']} aliases", icon=":material/restore:")
         st.rerun()
     if right.button("Cancel", use_container_width=True):
         st.session_state.pop("dialog", None)
@@ -144,7 +149,7 @@ def reset_default_tags_dialog(_id: int = 0) -> None:
         res = db.restore_default_tags(mode="full_reset")
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)
-        st.toast("Default tags reset to factory settings", icon=":material/refresh:")
+        queue_toast("Default tags reset to factory settings", icon=":material/refresh:")
         st.rerun()
     if right.button("Cancel", use_container_width=True):
         st.session_state.pop("dialog", None)
@@ -267,11 +272,11 @@ def enrich_game_dialog(game_id: int) -> None:
         with st.spinner("Searching metadata..."):
             try:
                 result = enrich_one(game_id, item['title'])
-                st.toast(result)
+                queue_toast(result, icon=":material/cloud_done:")
             except ProviderError as exc:
-                st.toast(f"Provider error: {exc}")
+                queue_toast(f"Provider error: {exc}", icon=":material/cloud_off:")
             except Exception as exc:
-                st.toast(f"Unexpected error: {exc}")
+                queue_toast(f"Unexpected error: {exc}", icon=":material/error:")
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         st.rerun()

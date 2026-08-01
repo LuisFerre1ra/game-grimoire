@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 import database as db
 from providers import ProviderError, get_ordered_providers
-from ui_helpers import cached_list_tags
+from ui_helpers import cached_list_tags, queue_toast
 from dialogs import queue_dialog
 from pages.add_games import enrich_one
 
@@ -34,7 +34,7 @@ def configuration_page() -> None:
             db.set_setting("rawg_api_key", rawg_key.strip())
             db.set_setting("igdb_client_id", igdb_id.strip())
             db.set_setting("igdb_client_secret", igdb_secret.strip())
-            st.success("Settings saved locally.")
+            st.toast("Settings saved", icon=":material/check_circle:")
     with tags_tab:
         st.subheader("Tag catalogue")
         
@@ -50,6 +50,7 @@ def configuration_page() -> None:
                 try:
                     db.add_tag(f"New tag {int(time.time() * 1000) % 10000}", "Other", "#7E8996", False)
                     cached_list_tags.clear()
+                    queue_toast("New tag added — rename it in the list below", icon=":material/check_circle:")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
@@ -111,7 +112,7 @@ def configuration_page() -> None:
                         try:
                             db.update_tag(t_id, new_name, effective_cat, new_color, new_main, new_aliases)
                             cached_list_tags.clear()
-                            st.toast(f"'{new_name}' saved", icon=":material/check_circle:")
+                            queue_toast(f"'{new_name}' saved", icon=":material/check_circle:")
                             st.rerun()
                         except ValueError as exc:
                             st.error(str(exc))
@@ -157,8 +158,7 @@ def configuration_page() -> None:
                     progress.progress(number / len(to_update), text=f"Updating {number} of {len(to_update)}...")
                 progress.empty()
                 cached_list_tags.clear()
-
-                st.success("Process complete.")
+                st.toast(f"Updated {len(to_update)} game(s)", icon=":material/cloud_done:")
                 with st.expander("View detailed results"):
                     st.write("\n\n".join(results))
     with export_tab:
