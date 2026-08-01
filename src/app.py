@@ -5,7 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 import database as db
-from ui_helpers import inject_styles
+from ui_helpers import inject_styles, show_queued_toasts
 from dialogs import show_pending_dialog
 from pages.inventory import inventory_page
 from pages.add_games import add_games_page
@@ -15,6 +15,7 @@ st.set_page_config(page_title="Game Grimoire", layout="wide")
 db.init_database()
 
 def main() -> None:
+    show_queued_toasts()
     inject_styles()
     nav_items = [
         {"name": "Backlog", "icon": ":material/inventory_2:"},
