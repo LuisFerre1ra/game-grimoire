@@ -5,14 +5,27 @@ from __future__ import annotations
 import streamlit as st
 
 import database as db
-from ui_helpers import inject_styles, show_queued_toasts
+from ui_helpers import (
+    inject_styles,
+    show_queued_toasts,
+    FAVICON_PNG,
+    LOGO_HORIZONTAL_SVG,
+    LOGO_MARK_SVG,
+)
 from dialogs import show_pending_dialog
 from pages.inventory import inventory_page
 from pages.add_games import add_games_page
 from pages.config import configuration_page
 
-st.set_page_config(page_title="Game Grimoire", layout="wide")
+page_icon = str(FAVICON_PNG) if FAVICON_PNG.exists() else "🎮"
+st.set_page_config(page_title="Game Grimoire", page_icon=page_icon, layout="wide")
 db.init_database()
+
+if hasattr(st, "logo") and LOGO_HORIZONTAL_SVG.exists():
+    st.logo(
+        image=str(LOGO_HORIZONTAL_SVG),
+        icon_image=str(LOGO_MARK_SVG) if LOGO_MARK_SVG.exists() else None,
+    )
 
 def main() -> None:
     show_queued_toasts()
@@ -28,7 +41,6 @@ def main() -> None:
         
     page = st.session_state["page"]
     with st.sidebar:
-        st.markdown("<h2 style='text-align: center; margin-bottom: 2rem; color: #e6eefb; font-weight: 700; letter-spacing: 0.5px;'>Game Grimoire</h2>", unsafe_allow_html=True)
         for item in nav_items:
             p = item["name"]
             icon = item["icon"]
