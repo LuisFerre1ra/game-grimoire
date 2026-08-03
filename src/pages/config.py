@@ -6,13 +6,13 @@ import pandas as pd
 import streamlit as st
 import database as db
 from providers import ProviderError, get_ordered_providers
-from ui_helpers import cached_list_tags, queue_toast
+from ui_helpers import cached_list_tags, queue_toast, LOGO_HORIZONTAL_SVG, LOGO_MARK_SVG
 from dialogs import queue_dialog
 from pages.add_games import enrich_one
 
 def configuration_page() -> None:
     st.title("Settings")
-    connection_tab, tags_tab, enrichment_tab, export_tab = st.tabs(["Connections", "Tags", "Update catalogue", "Export"])
+    connection_tab, tags_tab, enrichment_tab, export_tab, about_tab = st.tabs(["Connections", "Tags", "Update catalogue", "Export", "About"])
     with connection_tab:
         st.subheader("Optional services")
         st.caption("The app works without external services; providers are only queried on request.")
@@ -169,3 +169,20 @@ def configuration_page() -> None:
         st.download_button("Download JSON", json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8"), "game_grimoire_export.json", "application/json")
         if db.DB_PATH.exists():
             st.download_button("Download SQLite database", db.DB_PATH.read_bytes(), "game_grimoire_backup.db", "application/octet-stream")
+
+    with about_tab:
+        st.subheader("About Game Grimoire")
+        col_logo, col_info = st.columns([1, 2], vertical_alignment="center")
+        with col_logo:
+            if LOGO_HORIZONTAL_SVG.exists():
+                st.image(str(LOGO_HORIZONTAL_SVG), use_container_width=True)
+            elif LOGO_MARK_SVG.exists():
+                st.image(str(LOGO_MARK_SVG), width=120)
+        with col_info:
+            st.markdown("""
+            **Game Grimoire** is a local-first game collection manager designed for speed, privacy, and simplicity.
+            
+            - **Version**: 1.0.0
+            - **Storage**: SQLite local database
+            - **Database Path**: `{}`
+            """.format(db.DB_PATH))

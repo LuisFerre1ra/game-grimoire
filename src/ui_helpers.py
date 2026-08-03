@@ -6,6 +6,17 @@ from typing import Any, Iterable
 import streamlit as st
 import database as db
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+ASSETS_DIR = BASE_DIR / "assets"
+LOGO_HORIZONTAL_WHITE_SVG = ASSETS_DIR / "logo-horizontal-white.svg"
+LOGO_HORIZONTAL_WHITE_PNG = ASSETS_DIR / "logo-horizontal-white.png"
+LOGO_HORIZONTAL_BLACK_SVG = ASSETS_DIR / "logo-horizontal-black.svg"
+LOGO_HORIZONTAL_BLACK_PNG = ASSETS_DIR / "logo-horizontal-black.png"
+LOGO_HORIZONTAL_SVG = LOGO_HORIZONTAL_WHITE_SVG if LOGO_HORIZONTAL_WHITE_SVG.exists() else ASSETS_DIR / "logo-horizontal.svg"
+LOGO_HORIZONTAL_PNG = LOGO_HORIZONTAL_WHITE_PNG if LOGO_HORIZONTAL_WHITE_PNG.exists() else ASSETS_DIR / "logo-horizontal.png"
+LOGO_MARK_SVG = ASSETS_DIR / "logo-mark.svg"
+FAVICON_PNG = ASSETS_DIR / "favicon.png"
+
 STATUS_LABELS = {"backlog": "Backlog", "played": "Played", "abandoned": "Abandoned"}
 
 @st.cache_data(ttl=30)
@@ -47,6 +58,35 @@ def inject_styles() -> None:
             background:#27374d; color:#ffffff; font-size:.78rem; font-weight:500; text-shadow:0px 1px 2px rgba(0,0,0,0.6);}
           .muted {color:#9aa8ba; font-size:.86rem;}
           div[data-testid="stImage"] img {aspect-ratio: 3 / 4 !important; width:100% !important; height: auto !important; object-fit:cover; border-radius:.55rem;}
+          [data-testid="stSidebar"] div[data-testid="stImage"] img,
+          .app-logo img {
+            aspect-ratio: auto !important;
+            width: auto !important;
+            max-width: 100% !important;
+            height: auto !important;
+            object-fit: contain !important;
+            border-radius: 0 !important;
+            margin: 0 auto;
+            display: block;
+          }
+          /* Streamlit Logo Sizing Override */
+          div:has([data-testid="stSidebarLogo"]) {
+            width: 100%;
+          }
+          [data-testid="stSidebarLogo"] {
+            image-rendering: pixelated;
+            width: 100%;
+            height: auto !important;
+          }
+          /* Header icon shown when sidebar is collapsed */
+          img[data-testid="stHeaderLogo"] {
+            width: 32px !important;
+            height: 32px !important;
+            min-width: 32px !important;
+            min-height: 32px !important;
+            image-rendering: pixelated !important;
+            object-fit: contain !important;
+          }
           div[data-testid="stFullScreenFrame"] > div > div:first-child {padding: 0.5rem; top: 0 !important;}
           div[data-testid="stPopover"] button div[data-testid="stMarkdownContainer"] {display: none;}
           button[data-testid="stPopoverButton"] > div {margin-right:0;}
@@ -71,13 +111,35 @@ def inject_styles() -> None:
           .special-tags-container .tag-chip {
             box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.7);
           }
-          /* Custom Sidebar Navigation */
-          [data-testid="stSidebar"][aria-expanded="true"] {
-            width: 240px;
-          }
+          /* Custom Sidebar Navigation & Fixed 250px Width when expanded */
           [data-testid="stSidebar"] {
             background-color: #0b1423;
             border-right: 1px solid #1a2536;
+          }
+          [data-testid="stSidebar"][aria-expanded="true"] {
+            width: 250px !important;
+            min-width: 250px !important;
+            max-width: 250px !important;
+          }
+          /* Disable sidebar animation on close */
+          [data-testid="stSidebar"][aria-expanded="false"],
+          [data-testid="stSidebar"][aria-expanded="false"] * {
+            transition: none !important;
+            animation: none !important;
+          }
+          /* Completely remove sidebar resize handle (2nd child of stSidebar) */
+          [data-testid="stSidebar"] > :nth-child(2),
+          [data-testid="stSidebarResizer"],
+          div[data-testid="stSidebarResizer"] {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            overflow: hidden !important;
+            pointer-events: none !important;
+            cursor: default !important;
+            opacity: 0 !important;
           }
           [data-testid="stSidebar"] [data-testid="stButton"] button {
             border: none;
