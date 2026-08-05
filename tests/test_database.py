@@ -126,6 +126,19 @@ class TestDatabase(unittest.TestCase):
         db.delete_tag(tag_id)
         self.assertNotIn(tag_id, db.get_game_tags(game_id))
 
+    def test_update_game_tags_allows_adding_and_removing_all_tags(self):
+        """Test that updating a game allows replacing all tag IDs (default or custom)."""
+        tag1 = db.get_or_create_tag("RPG", category="Genres", is_custom=False)
+        tag2 = db.get_or_create_tag("Favorite", category="Personal", is_custom=True)
+        tag3 = db.get_or_create_tag("Strategy", category="Genres", is_custom=False)
+
+        game_id = db.create_game(title="Strategy RPG", tag_ids=[tag1, tag2])
+        self.assertCountEqual(db.get_game_tags(game_id), [tag1, tag2])
+
+        # Remove tag1 and tag2, add tag3
+        db.update_game(game_id, title="Strategy RPG", ready_to_play=False, notes=None, tag_ids=[tag3])
+        self.assertCountEqual(db.get_game_tags(game_id), [tag3])
+
     def test_settings(self):
         """Test getting and setting key-value configuration settings."""
         db.set_setting("rawg_api_key", "test_key_123")

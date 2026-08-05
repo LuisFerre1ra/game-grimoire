@@ -23,14 +23,13 @@ def edit_game_dialog(game_id: int) -> None:
         st.error("Game no longer exists.")
         return
     tags = cached_list_tags()
-    custom_tags = [t for t in tags if t["is_custom"]]
-    label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
+    label_to_id = {tag["name"]: tag["id"] for tag in tags}
     selected_ids = set(db.get_game_tags(game_id))
-    selected = [tag["name"] for tag in custom_tags if tag["id"] in selected_ids]
+    selected = [tag["name"] for tag in tags if tag["id"] in selected_ids]
     with st.form(f"edit_game_{game_id}"):
         title = st.text_input("Title", value=item["title"])
         ready = st.checkbox("Ready to play", value=item["ready_to_play"])
-        chosen_tags = st.multiselect("Personal Tags", list(label_to_id), default=selected)
+        chosen_tags = st.multiselect("Tags", list(label_to_id), default=selected)
         notes = st.text_area("Personal Notes", value=item.get("notes") or "", height=90)
         hours = st.number_input("Playtime (hours; 0 to leave undefined)", min_value=0.0, value=float(item["hours"] or 0), step=0.5)
         saved = st.form_submit_button("Save Changes", type="primary")
