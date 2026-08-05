@@ -39,8 +39,7 @@ def add_games_page() -> None:
     st.title("Add Games")
     st.write("Paste one title per line. Duplicates are detected by normalized title.")
     tags = cached_list_tags()
-    custom_tags = [t for t in tags if t["is_custom"]]
-    label_to_id = {tag["name"]: tag["id"] for tag in custom_tags}
+    label_to_id = {tag["name"]: tag["id"] for tag in tags}
     has_providers = bool(get_ordered_providers())
     with st.form("add_games"):
         titles = st.text_area("Titles", height=220, placeholder="Hades\nOuter Wilds\nBalatro")

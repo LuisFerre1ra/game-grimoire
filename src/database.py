@@ -483,7 +483,7 @@ def create_game(
 
 def _set_game_tags(conn: sqlite3.Connection, game_id: int, tag_ids: Sequence[int]) -> None:
     conn.execute(
-        "DELETE FROM game_tags WHERE game_id = ? AND tag_id IN (SELECT id FROM tags WHERE is_custom = 1)",
+        "DELETE FROM game_tags WHERE game_id = ?",
         (game_id,)
     )
     conn.executemany(
