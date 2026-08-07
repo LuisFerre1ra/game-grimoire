@@ -57,10 +57,17 @@ def status_dialog(game_id: int) -> None:
         st.error("Game no longer exists.")
         return
     options = list(STATUS_LABELS)
-    status = st.selectbox("Status", options, index=options.index(item["status"]), format_func=lambda value: STATUS_LABELS[value])
+    def format_status(val: str) -> str:
+        if val == "played":
+            return "Played (Finished)"
+        elif val == "abandoned":
+            return "Abandoned"
+        return "Backlog"
+    status = st.selectbox("Status", options, index=options.index(item["status"]), format_func=format_status)
     year: int | None = None
     event_notes = ""
     if status in {"played", "abandoned"}:
+        st.caption("Changing status to Played or Abandoned will create a play history entry for this game.")
         year = int(st.number_input("Year Played", min_value=1900, max_value=2200, value=datetime.now().year, step=1))
         event_notes = st.text_area("Session Notes (optional)", height=80)
     if st.button("Save Status", type="primary"):
@@ -94,7 +101,7 @@ def clear_metadata_dialog(game_id: int) -> None:
         st.session_state.pop("dialog", None)
         st.rerun()
         return
-    st.warning(f"All downloaded details (cover, genres, etc.) will be deleted for **{item['title']}**. Are you sure?")
+    st.warning(f"All downloaded details (cover, genres, etc.) will be deleted for **{item['title']}**. The game itself stays in your library. Are you sure?")
     left, right = st.columns(2)
     if left.button("Clear details", type="primary", use_container_width=True):
         db.clear_game_metadata(game_id)
@@ -190,10 +197,13 @@ def metadata_dialog(game_id: int) -> None:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    a, b, c = st.columns(3)
-    a.metric("Release Date", readable_date(item.get("release_date")))
-    b.metric("Duration", playtime)
-    c.metric("Rating", rating_str)
+    status_str = "Played" if item["status"] == "played" else ("Abandoned" if item["status"] == "abandoned" else "Backlog")
+
+    a, b, c, d = st.columns(4)
+    a.metric("Status", status_str)
+    b.metric("Release Date", readable_date(item.get("release_date")))
+    c.metric("Duration", playtime)
+    d.metric("Rating", rating_str)
 
     try:
         dev_info = json.loads(item.get("developer_info_json") or "{}")
@@ -235,12 +245,14 @@ def metadata_dialog(game_id: int) -> None:
             _, unmapped = map_raw_tags(raw_tags)
             if unmapped:
                 st.write(f"**Other Tags (Unmapped):** {', '.join(sorted(set(unmapped)))}")
+                st.caption("These tag names came from the provider but don't match any alias in your catalogue. You can add them as aliases in Settings \u2192 Tags.")
         
     st.write(f"**Description:** {description}")
     if item.get("cover_source_url"):
         st.link_button("Open source image", item["cover_source_url"])
     if provider_data and provider_data.get("raw_payload_json"):
-        with st.expander("Internal Archive"):
+        with st.expander("Raw provider data"):
+            st.caption("The original JSON response stored from the last metadata fetch.")
             try:
                 st.json(json.loads(provider_data["raw_payload_json"]))
             except (json.JSONDecodeError, TypeError):
