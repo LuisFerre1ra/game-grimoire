@@ -16,18 +16,45 @@ def configuration_page() -> None:
     with connection_tab:
         st.subheader("Optional services")
         st.caption("The app works without external services; providers are only queried on request.")
+        with st.expander("How to get API credentials"):
+            st.markdown(
+                "**RAWG** — Free API key after creating an account.\n"
+                "1. Go to [rawg.io/apidocs](https://rawg.io/apidocs) and create a free account.\n"
+                "2. Your API key is shown on that page after login. Copy it into the field below.\n\n"
+                "**IGDB** — uses Twitch for authentication (the credentials come from Twitch, not IGDB directly).\n"
+                "1. Log in or register at [dev.twitch.tv/console](https://dev.twitch.tv/console).\n"
+                "2. Create a new application (any name, set OAuth redirect to `http://localhost`).\n"
+                "3. Copy the **Client ID** shown on the app page.\n"
+                "4. Click *New Secret* to generate a **Client Secret**.\n"
+                "5. Paste both into the fields below. The access token is fetched and refreshed automatically."
+            )
         with st.form("connections"):
             current_val = db.get_setting("provider_priority", "IGDB,RAWG")
             default_selection = [p for p in current_val.split(",") if p in ["IGDB", "RAWG"]]
             
             provider_order_list = st.multiselect(
-                "Provider priority order (select in order of preference)", 
-                options=["IGDB", "RAWG"], 
-                default=default_selection
+                "Provider priority order (select in order of preference)",
+                options=["IGDB", "RAWG"],
+                default=default_selection,
+                help="Providers are tried in this order. If the first one returns no results for a game, the next one is used as fallback.",
             )
-            rawg_key = st.text_input("RAWG API Key", value=db.get_setting("rawg_api_key"), type="password")
-            igdb_id = st.text_input("IGDB Client ID", value=db.get_setting("igdb_client_id"))
-            igdb_secret = st.text_input("IGDB Client Secret", value=db.get_setting("igdb_client_secret"), type="password")
+            rawg_key = st.text_input(
+                "RAWG API Key",
+                value=db.get_setting("rawg_api_key"),
+                type="password",
+                help="Get a free key at rawg.io/apidocs. Only queried when you request metadata.",
+            )
+            igdb_id = st.text_input(
+                "IGDB Client ID",
+                value=db.get_setting("igdb_client_id"),
+                help="Issued by Twitch (dev.twitch.tv/console). IGDB uses Twitch for authentication — see the guide above.",
+            )
+            igdb_secret = st.text_input(
+                "IGDB Client Secret",
+                value=db.get_setting("igdb_client_secret"),
+                type="password",
+                help="Generated alongside the Client ID in your Twitch developer app. Access tokens are refreshed automatically.",
+            )
             saved = st.form_submit_button("Save settings")
         if saved:
             db.set_setting("provider_priority", ",".join(provider_order_list))
@@ -79,10 +106,10 @@ def configuration_page() -> None:
             h1.markdown("**Name**")
             h2.markdown("**Category**")
             h3.markdown("**Color**")
-            h4.markdown("**Aliases**")
-            h5.markdown("<div style='text-align: center; font-weight: bold;'>Main</div>", unsafe_allow_html=True)
-            h6.markdown("<div style='text-align: center; font-weight: bold;'>Save</div>", unsafe_allow_html=True)
-            h7.markdown("<div style='text-align: center; font-weight: bold;'>Delete</div>", unsafe_allow_html=True)
+            h4.markdown("**Aliases**", help="Comma-separated alternative names. When importing game details from IGDB or RAWG, any provider tags matching these aliases will automatically map to this local tag.")
+            h5.markdown("**Main**", help="Tags marked as Main are featured prominently directly on game cover cards in your collection grid, allowing you to quickly spot them at a glance.")
+            h6.markdown("<div class='col-header-center'>Save</div>", unsafe_allow_html=True)
+            h7.markdown("<div class='col-header-center'>Delete</div>", unsafe_allow_html=True)
 
             for tag in all_tags:
                 t_id = tag["id"]
@@ -166,9 +193,12 @@ def configuration_page() -> None:
         rows = db.export_rows()
         frame = pd.DataFrame(rows)
         st.download_button("Download CSV", frame.to_csv(index=False).encode("utf-8-sig"), "game_grimoire_export.csv", "text/csv")
+        st.caption("All games with their status, hours, tags (comma-separated), release date, date added, and years played.")
         st.download_button("Download JSON", json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8"), "game_grimoire_export.json", "application/json")
+        st.caption("Same data as CSV in structured JSON format, one object per game.")
         if db.DB_PATH.exists():
             st.download_button("Download SQLite database", db.DB_PATH.read_bytes(), "game_grimoire_backup.db", "application/octet-stream")
+            st.caption("Full backup of the local database, including all settings, tags, aliases, and play history.")
 
     with about_tab:
         st.subheader("About Game Grimoire")
