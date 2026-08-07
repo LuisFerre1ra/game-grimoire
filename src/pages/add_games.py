@@ -37,7 +37,7 @@ def enrich_one(game_id: int, title: str) -> str:
 
 def add_games_page() -> None:
     st.title("Add Games")
-    st.write("Paste one title per line. Duplicates are detected by normalized title.")
+    st.write("Paste one title per line. Duplicates are detected by title (case-insensitive, punctuation is ignored).")
     tags = cached_list_tags()
     label_to_id = {tag["name"]: tag["id"] for tag in tags}
     has_providers = bool(get_ordered_providers())
@@ -45,8 +45,17 @@ def add_games_page() -> None:
         titles = st.text_area("Titles", height=220, placeholder="Hades\nOuter Wilds\nBalatro")
         destination = st.radio("Add to", ["Backlog", "Played", "Abandoned"], horizontal=True)
         selected_tags = st.multiselect("Initial Tags", list(label_to_id))
-        ready = st.checkbox("Mark as ready to play", disabled=destination != "Backlog")
-        enrich = st.checkbox("Auto-fetch details", value=has_providers, disabled=not has_providers)
+        ready = st.checkbox(
+            "Mark as ready to play",
+            disabled=destination != "Backlog",
+            help="Marks the game as installed and ready to launch. Only applies to Backlog entries. You can filter by this flag in your Backlog.",
+        )
+        enrich = st.checkbox(
+            "Auto-fetch details",
+            value=has_providers,
+            disabled=not has_providers,
+            help="Automatically searches the configured providers (IGDB, RAWG) and imports covers, genres, release dates, and more. Configure a provider in Settings → Connections to enable this.",
+        )
         submitted = st.form_submit_button("Add Games", type="primary")
     if not submitted:
         return
