@@ -1,16 +1,16 @@
 """Unit tests for SQLite database persistence module."""
 
-import unittest
 import shutil
-import tempfile
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 
 # Add project src/ directory to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import database as db
-from interfaces import GameStatus
+
 
 class TestDatabase(unittest.TestCase):
     def setUp(self):
@@ -71,7 +71,7 @@ class TestDatabase(unittest.TestCase):
     def test_unique_normalized_title(self):
         """Test that creating duplicate titles raises an exception."""
         db.create_game(title="Portal 2")
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             db.create_game(title="portal 2")
 
     def test_update_and_delete_game(self):

@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 # Add project src/ directory to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from providers import RAWGProvider, IGDBProvider, ProviderError, map_raw_tags
+from providers import IGDBProvider, ProviderError, RAWGProvider, map_raw_tags
+
 
 class TestProviders(unittest.TestCase):
     def test_provider_missing_key_raises_error(self):
@@ -24,6 +25,16 @@ class TestProviders(unittest.TestCase):
         mapped, unmapped = map_raw_tags([])
         self.assertIsInstance(mapped, dict)
         self.assertEqual(unmapped, [])
+
+    @patch("database.lookup_aliases_by_names", return_value=[])
+    @patch("database.list_tags", return_value=[{"name": "RPG", "category": "Genres"}])
+    def test_map_raw_tags_with_tags(self, mock_list_tags, mock_lookup_aliases):
+        """Test mapping raw tags with non-empty list calling db.list_tags."""
+        mapped, unmapped = map_raw_tags(["RPG", "UnknownTag"])
+        self.assertIn("RPG", mapped["Genres"])
+        self.assertEqual(unmapped, ["UnknownTag"])
+        mock_list_tags.assert_called_once()
+
 
     @patch("database.get_setting", return_value=None)
     @patch("database.set_setting")

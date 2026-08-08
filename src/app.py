@@ -5,17 +5,17 @@ from __future__ import annotations
 import streamlit as st
 
 import database as db
+from dialogs import show_pending_dialog
+from pages.add_games import add_games_page
+from pages.config import configuration_page
+from pages.inventory import inventory_page
 from ui_helpers import (
-    inject_styles,
-    show_queued_toasts,
     FAVICON_PNG,
     LOGO_HORIZONTAL_SVG,
     LOGO_MARK_SVG,
+    inject_styles,
+    show_queued_toasts,
 )
-from dialogs import show_pending_dialog
-from pages.inventory import inventory_page
-from pages.add_games import add_games_page
-from pages.config import configuration_page
 
 page_icon = str(FAVICON_PNG) if FAVICON_PNG.exists() else "🎮"
 st.set_page_config(page_title="Game Grimoire", page_icon=page_icon, layout="wide")

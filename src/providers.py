@@ -6,16 +6,14 @@ import hashlib
 import mimetypes
 import time
 from collections import deque
-from pathlib import Path
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
 
-from database import DATA_DIR
-from interfaces import UnifiedGameData, MetadataProvider, GameStatus
-
 import database as db
+from database import DATA_DIR
+from interfaces import MetadataProvider, UnifiedGameData
 
 RAWG_BASE_URL = "https://api.rawg.io/api"
 COVERS_DIR = DATA_DIR / "covers"
@@ -38,7 +36,7 @@ def map_raw_tags(raw_tags: list[str]) -> tuple[dict[str, list[str]], list[str]]:
     for r in rows:
         found_aliases[r["alias_name"].lower()] = (r["name"], r["category"])
         
-    all_tags = db.cached_list_tags()
+    all_tags = db.list_tags()
     tag_by_lower_name = {t["name"].lower(): (t["name"], t["category"]) for t in all_tags}
 
     for raw in raw_tags:
@@ -112,7 +110,7 @@ class RAWGProvider(MetadataProvider):
             raw_tags.append(esrb["name"])
         raw_tags.extend([g.get("name") for g in (data.get("genres") or []) if isinstance(g, dict) and g.get("name")])
         raw_tags.extend([t.get("name") for t in (data.get("tags") or []) if isinstance(t, dict) and t.get("name")])
-        mapped, unmapped = map_raw_tags(raw_tags)
+        mapped, _unmapped = map_raw_tags(raw_tags)
         
         playtime = data.get("playtime")
         playtime_hours = float(playtime) if (playtime is not None and float(playtime) > 0) else None
@@ -288,7 +286,7 @@ class IGDBProvider(MetadataProvider):
         if data.get("first_release_date"):
             try:
                 release_date = datetime.fromtimestamp(data["first_release_date"], tz=UTC).strftime("%Y-%m-%d")
-            except Exception:
+            except Exception:  # noqa: S110, BLE001
                 pass
 
         status_map = {
@@ -310,7 +308,7 @@ class IGDBProvider(MetadataProvider):
         if game_status:
             raw_tags.append(game_status)
 
-        mapped, unmapped = map_raw_tags(raw_tags)
+        mapped, _unmapped = map_raw_tags(raw_tags)
 
         return UnifiedGameData(
             provider_id=str(data.get("id")),
