@@ -1,9 +1,13 @@
 from __future__ import annotations
+
 import html as html_mod
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+
 import streamlit as st
+
 import database as db
 
 BASE_DIR = Path(__file__).resolve().parent.parent
