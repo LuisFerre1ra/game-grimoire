@@ -8,12 +8,13 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import unicodedata
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-import threading
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from interfaces import GameStatus, UnifiedGameData
 
@@ -42,7 +43,7 @@ def get_default_tags_data() -> list[dict[str, Any]]:
     if DEFAULT_TAGS_FILE.exists():
         try:
             return json.loads(DEFAULT_TAGS_FILE.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.error("Failed to load default_tags.json: %s", exc)
     return []
 
@@ -62,7 +63,6 @@ _conn: sqlite3.Connection | None = None
 
 def _get_connection() -> sqlite3.Connection:
     """Get thread-local SQLite connection."""
-    global _conn
     if _conn is not None:
         return _conn
     conn = getattr(_local, "conn", None)
@@ -82,13 +82,13 @@ def close_connection() -> None:
     if conn is not None:
         try:
             conn.close()
-        except Exception:
+        except Exception:  # noqa: S110, BLE001
             pass
         _local.conn = None
     if _conn is not None:
         try:
             _conn.close()
-        except Exception:
+        except Exception:  # noqa: S110, BLE001
             pass
         _conn = None
 
@@ -205,7 +205,6 @@ def init_database() -> None:
 
 def get_schema_version(conn: sqlite3.Connection | None = None) -> int:
     """Return current integer schema_version stored in schema_meta (defaults to 1)."""
-    close_conn = False
     if conn is None:
         conn = _get_connection()
     try:
@@ -214,7 +213,7 @@ def get_schema_version(conn: sqlite3.Connection | None = None) -> int:
         ).fetchone()
         if row:
             return int(row[0])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.debug("Failed to query schema_version: %s", exc)
     return 1
 
@@ -299,7 +298,7 @@ def list_tags() -> list[dict[str, Any]]:
         for row in rows:
             tag_dict = dict(row)
             aliases_text = tag_dict.pop("aliases_text", None) or ""
-            tag_dict["aliases"] = ", ".join(sorted(set(a.strip() for a in aliases_text.split(",") if a.strip())))
+            tag_dict["aliases"] = ", ".join(sorted({a.strip() for a in aliases_text.split(",") if a.strip()}))
             result.append(tag_dict)
         return result
 

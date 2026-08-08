@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 # Add project src/ directory to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from providers import RAWGProvider, IGDBProvider, ProviderError, map_raw_tags
+from providers import IGDBProvider, ProviderError, RAWGProvider, map_raw_tags
+
 
 class TestProviders(unittest.TestCase):
     def test_provider_missing_key_raises_error(self):

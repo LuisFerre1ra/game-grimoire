@@ -1,14 +1,17 @@
 from __future__ import annotations
+
 import json
 import time
-from typing import Any
+
 import pandas as pd
 import streamlit as st
+
 import database as db
-from providers import ProviderError, get_ordered_providers
-from ui_helpers import cached_list_tags, queue_toast, LOGO_HORIZONTAL_SVG, LOGO_MARK_SVG
 from dialogs import queue_dialog
 from pages.add_games import enrich_one
+from providers import get_ordered_providers
+from ui_helpers import LOGO_HORIZONTAL_SVG, LOGO_MARK_SVG, cached_list_tags, queue_toast
+
 
 def configuration_page() -> None:
     st.title("Settings")
@@ -66,7 +69,7 @@ def configuration_page() -> None:
         st.subheader("Tag catalogue")
         
         all_tags = cached_list_tags()
-        existing_cats = sorted(list(set(t["category"] for t in all_tags if t.get("category"))))
+        existing_cats = sorted({t["category"] for t in all_tags if t.get("category")})
         if not existing_cats:
             existing_cats = ["Genres", "Themes", "Game modes", "Age Rating", "Status", "Reviews", "Requirements", "Compatibility", "Other"]
         cat_options = existing_cats + ["+ New category..."]
@@ -180,7 +183,7 @@ def configuration_page() -> None:
                 for number, item in enumerate(to_update, start=1):
                     try:
                         results.append(f"{item['title']}: {enrich_one(item['id'], item['title'])}")
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001
                         results.append(f"{item['title']}: {exc}")
                     progress.progress(number / len(to_update), text=f"Updating {number} of {len(to_update)}...")
                 progress.empty()
@@ -209,10 +212,10 @@ def configuration_page() -> None:
             elif LOGO_MARK_SVG.exists():
                 st.image(str(LOGO_MARK_SVG), width=120)
         with col_info:
-            st.markdown("""
+            st.markdown(f"""
             **Game Grimoire** is a local-first game collection manager designed for speed, privacy, and simplicity.
             
             - **Version**: 1.0.0
             - **Storage**: SQLite local database
-            - **Database Path**: `{}`
-            """.format(db.DB_PATH))
+            - **Database Path**: `{db.DB_PATH}`
+            """)

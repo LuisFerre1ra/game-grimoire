@@ -1,17 +1,20 @@
 from __future__ import annotations
+
 import json
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+
 import streamlit as st
+
 import database as db
 from interfaces import GameStatus
 from providers import ProviderError, cache_cover, get_ordered_providers
 from ui_helpers import cached_list_tags
 
+
 def enrich_one(game_id: int, title: str) -> str:
     providers = get_ordered_providers()
     if not providers:
-        return "No providers configured."
+        return "No providers enabled in Settings."
         
     last_error = ""
     for provider in providers:
@@ -23,14 +26,14 @@ def enrich_one(game_id: int, title: str) -> str:
                 local_cover = None
                 try:
                     local_cover = cache_cover(unified.cover_url, game_id)
-                except Exception:
+                except Exception:  # noqa: S110, BLE001
                     pass
                 db.update_game_metadata(game_id, unified, json.dumps(raw, ensure_ascii=False), provider.get_name(), local_cover)
                 return f"Updated from {provider.get_name()}."
         except ProviderError as exc:
             last_error = f"{provider.get_name()} error: {exc}"
             continue
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             last_error = f"{provider.get_name()} unexpected error: {exc}"
             continue
     return last_error or "No matches found in any provider."
@@ -76,7 +79,7 @@ def add_games_page() -> None:
         game_id = db.create_game(title, status=status, ready_to_play=ready if status == GameStatus.BACKLOG else False, tag_ids=[label_to_id[name] for name in selected_tags])
         if status in {GameStatus.PLAYED, GameStatus.ABANDONED}:
             outcome = "completed" if status == GameStatus.PLAYED else "abandoned"
-            db.add_play_event(game_id, outcome, datetime.now().year)
+            db.add_play_event(game_id, outcome, datetime.now(UTC).year)
         existing.add(normalized)
         created.append((game_id, title))
     messages: list[str] = []
