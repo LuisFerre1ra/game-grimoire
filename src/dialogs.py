@@ -1,13 +1,23 @@
 from __future__ import annotations
+
 import html as html_mod
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+
 import streamlit as st
+
 import database as db
 from providers import ProviderError, map_raw_tags
-from ui_helpers import cached_list_tags, STATUS_LABELS, readable_date, format_hours, cover_reference, queue_toast
+from ui_helpers import (
+    STATUS_LABELS,
+    cached_list_tags,
+    format_hours,
+    queue_toast,
+    readable_date,
+)
+
 
 def queue_dialog(kind: str, game_id: int) -> None:
     st.session_state["dialog"] = {"kind": kind, "game_id": game_id}
@@ -68,7 +78,7 @@ def status_dialog(game_id: int) -> None:
     event_notes = ""
     if status in {"played", "abandoned"}:
         st.caption("Changing status to Played or Abandoned will create a play history entry for this game.")
-        year = int(st.number_input("Year Played", min_value=1900, max_value=2200, value=datetime.now().year, step=1))
+        year = int(st.number_input("Year Played", min_value=1900, max_value=2200, value=datetime.now(UTC).year, step=1))
         event_notes = st.text_area("Session Notes (optional)", height=80)
     if st.button("Save Status", type="primary"):
         db.change_status(game_id, status, year, event_notes)
@@ -152,7 +162,7 @@ def reset_default_tags_dialog(_id: int = 0) -> None:
     st.warning("All default tags will be reset to factory settings (original categories, colors, and aliases). Custom user tags will be preserved. Are you sure?")
     left, right = st.columns(2)
     if left.button("Reset defaults", type="primary", use_container_width=True):
-        res = db.restore_default_tags(mode="full_reset")
+        db.restore_default_tags(mode="full_reset")
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)
         queue_toast("Default tags reset to factory settings", icon=":material/refresh:")
@@ -175,7 +185,6 @@ def metadata_dialog(game_id: int) -> None:
     
     rating_str = "—"
     playtime = format_hours(item.get("hours"))
-    age_rating = "—"
     description = "—"
 
     raw_payload_meta = {}
@@ -187,7 +196,7 @@ def metadata_dialog(game_id: int) -> None:
                 description = meta.get("description_raw") or meta.get("description") or "—"
                 esrb = meta.get("esrb_rating")
                 if esrb and "name" in esrb:
-                    age_rating = esrb["name"]
+                    esrb["name"]
                 if meta.get("rating"):
                     rating_str = f"{meta['rating']}/{meta.get('rating_top', 5)}"
             elif provider_data["provider_name"] == "IGDB":
@@ -286,7 +295,7 @@ def enrich_game_dialog(game_id: int) -> None:
                 queue_toast(result, icon=":material/cloud_done:")
             except ProviderError as exc:
                 queue_toast(f"Provider error: {exc}", icon=":material/cloud_off:")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 queue_toast(f"Unexpected error: {exc}", icon=":material/error:")
         cached_list_tags.clear()
         st.session_state.pop("dialog", None)

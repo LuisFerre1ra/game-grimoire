@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, Any
+from typing import Any, Protocol
+
 
 class GameStatus(str, Enum):
     """Canonical game statuses. Inherits from str so values work

@@ -1,12 +1,26 @@
 from __future__ import annotations
+
 import html as html_mod
 from typing import Any
+
 import pandas as pd
 import streamlit as st
 from st_keyup import st_keyup
+
 import database as db
-from ui_helpers import cached_list_tags, format_hours, cover_reference, tag_html, readable_date, status_tag_html, ICON_CHECK, ICON_BAN, ICON_BOLT
 from dialogs import game_actions
+from ui_helpers import (
+    ICON_BAN,
+    ICON_BOLT,
+    ICON_CHECK,
+    cached_list_tags,
+    cover_reference,
+    format_hours,
+    readable_date,
+    status_tag_html,
+    tag_html,
+)
+
 
 def render_card(item: dict[str, Any], prefix: str, main_tags_names: set[str]) -> None:
     status = item.get("status", "backlog")
@@ -102,8 +116,7 @@ def filter_and_sort(items: list[dict[str, Any]], key: str) -> list[dict[str, Any
         h = float(hours)
         if duration_category == "Short (<10h)" and h < 10: return True
         if duration_category == "Medium (10-30h)" and 10 <= h < 30: return True
-        if duration_category == "Long (30h+)" and h >= 30: return True
-        return False
+        return bool(duration_category == "Long (30h+)" and h >= 30)
 
     text = (query or "").strip().casefold()
     filtered = [
